@@ -326,8 +326,11 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 99%;
 }
+
 
 .track-artist {
   margin: 0;
@@ -335,8 +338,11 @@ body {
   color: var(--color-primary-strong);
   font-weight: 500;
   white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 90%;
 }
+
 
 .track-date {
   margin: 0;
