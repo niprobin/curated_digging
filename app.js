@@ -156,6 +156,11 @@ function normaliseData(entries) {
         return null;
       }
 
+      const checkedValue = entry.checked;
+      if (isCheckedFlag(checkedValue)) {
+        return null;
+      }
+
       const dateRaw =
         typeof entry.date === 'string'
           ? entry.date.trim()
@@ -196,6 +201,21 @@ function normaliseData(entries) {
     tracks,
     counts,
   };
+}
+
+function isCheckedFlag(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    return ['true', '1', 'yes', 'y'].includes(normalized);
+  }
+  return false;
 }
 
 function parseDateValue(value) {
