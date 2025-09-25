@@ -1,0 +1,293 @@
+﻿:root {
+  color-scheme: dark;
+  --color-bg: #04080f;
+  --color-bg-alt: rgba(24, 33, 51, 0.65);
+  --color-surface: rgba(20, 29, 45, 0.8);
+  --color-card: rgba(18, 26, 40, 0.85);
+  --color-border: rgba(88, 121, 184, 0.35);
+  --color-primary: #4da6ff;
+  --color-primary-strong: #82caff;
+  --color-text: #f5f7ff;
+  --color-muted: rgba(229, 236, 255, 0.7);
+  --shadow-elevated: 0 18px 38px rgba(4, 8, 15, 0.45);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --transition-base: 200ms ease;
+  font-size: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: radial-gradient(circle at 20% 20%, rgba(62, 84, 130, 0.35), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(41, 104, 166, 0.45), transparent 45%),
+    var(--color-bg);
+  color: var(--color-text);
+}
+
+.app-shell {
+  padding-bottom: 80px;
+}
+
+.container {
+  width: min(1100px, 92vw);
+  margin: 0 auto;
+}
+
+.site-header {
+  padding: 64px 0 40px;
+  background: linear-gradient(165deg, rgba(14, 22, 36, 0.95), rgba(7, 12, 20, 0.7));
+  border-bottom: 1px solid rgba(77, 166, 255, 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+
+.site-header h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 2.6vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin-top: 12px;
+  max-width: 540px;
+  color: var(--color-muted);
+  font-size: 1rem;
+}
+
+main {
+  margin-top: 36px;
+  display: grid;
+  gap: 28px;
+}
+
+.fields-panel,
+.filters-panel,
+.tabs-panel {
+  background: var(--color-surface);
+  padding: 22px clamp(18px, 3vw, 32px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-elevated);
+}
+
+.fields-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fields-heading h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.refresh-button {
+  color: var(--color-text);
+  background: rgba(77, 166, 255, 0.15);
+  border: 1px solid rgba(77, 166, 255, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
+}
+
+.refresh-button:hover,
+.refresh-button:focus {
+  outline: none;
+  background: rgba(77, 166, 255, 0.4);
+  transform: translateY(-1px);
+  border-color: rgba(130, 202, 255, 0.6);
+}
+
+.field-list {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.field-list li {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(19, 29, 46, 0.85);
+  border: 1px solid rgba(77, 166, 255, 0.25);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.tab-list {
+  display: flex;
+  overflow-x: auto;
+  gap: 12px;
+  scrollbar-width: thin;
+  padding-bottom: 6px;
+}
+
+.tab-button {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  background: rgba(18, 28, 45, 0.75);
+  border: 1px solid rgba(77, 166, 255, 0.2);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-base), background var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
+}
+
+.tab-button:hover,
+.tab-button:focus {
+  outline: none;
+  color: var(--color-text);
+  background: rgba(77, 166, 255, 0.3);
+  border-color: rgba(77, 166, 255, 0.55);
+}
+
+.tab-button.active {
+  color: var(--color-text);
+  background: linear-gradient(135deg, rgba(77, 166, 255, 0.8), rgba(22, 98, 183, 0.8));
+  border-color: rgba(130, 202, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.filter-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filter-button {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(77, 166, 255, 0.2);
+  background: rgba(18, 29, 45, 0.7);
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-base), color var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
+}
+
+.filter-button:hover,
+.filter-button:focus {
+  outline: none;
+  color: var(--color-text);
+  background: rgba(77, 166, 255, 0.35);
+  border-color: rgba(77, 166, 255, 0.55);
+}
+
+.filter-button.active {
+  color: var(--color-text);
+  background: rgba(77, 166, 255, 0.75);
+  border-color: rgba(130, 202, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 22px;
+}
+
+.track-card {
+  padding: 22px;
+  background: var(--color-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(77, 166, 255, 0.15);
+  box-shadow: var(--shadow-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 220ms ease, border-color var(--transition-base), box-shadow 260ms ease;
+}
+
+.track-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(130, 202, 255, 0.55);
+  box-shadow: 0 28px 60px rgba(4, 8, 15, 0.55);
+}
+
+.track-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.track-artist {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-primary-strong);
+  font-weight: 500;
+}
+
+.track-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+
+.track-meta span {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 20, 33, 0.9);
+  border: 1px solid rgba(77, 166, 255, 0.25);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.track-meta span strong {
+  font-weight: 600;
+  margin-right: 6px;
+  color: var(--color-muted);
+}
+
+.status-message {
+  text-align: center;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  margin-top: 18px;
+}
+
+@media (max-width: 720px) {
+  .site-header {
+    padding: 48px 0 28px;
+  }
+
+  .filters-panel,
+  .tabs-panel,
+  .fields-panel {
+    padding: 18px;
+  }
+
+  .tab-button {
+    padding: 10px 16px;
+    font-size: 0.95rem;
+  }
+
+  .cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+  }
+}

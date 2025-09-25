@@ -1,0 +1,45 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Curated Digging</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="site-header">
+        <div class="container">
+          <h1>Curated Digging</h1>
+          <p class="tagline">Browse every track gathered in the shared crate, curator by curator.</p>
+        </div>
+      </header>
+
+      <main class="container">
+        <section class="fields-panel" aria-labelledby="fields-title">
+          <div class="fields-heading">
+            <h2 id="fields-title">Available Fields</h2>
+            <button id="refreshButton" class="refresh-button" type="button" aria-live="polite">Refresh</button>
+          </div>
+          <ul id="fieldList" class="field-list"></ul>
+        </section>
+
+        <section class="tabs-panel" aria-label="Curator selector">
+          <div id="tabList" class="tab-list" role="tablist"></div>
+        </section>
+
+        <section class="filters-panel" aria-label="Date filters">
+          <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
+        </section>
+
+        <section id="cardsContainer" class="cards-grid" aria-live="polite"></section>
+        <p id="statusMessage" class="status-message" role="status"></p>
+      </main>
+    </div>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
