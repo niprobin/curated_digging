@@ -24,6 +24,10 @@ const state = {
   pageSize: 20,
   checkedTracks: new Set(),
   showChecked: false,
+  audioElement: null,
+  playingTrackId: null,
+  isFetchingStream: false,
+  playbackAbortController: null,
 };
 
 const elements = {
@@ -360,6 +364,11 @@ function renderCards() {
   const curatorTracks = state.tracks
     .filter((track) => track.curator === state.activeCurator)
     .filter(matchesActiveFilter);
+
+  if (state.playingTrackId && !curatorTracks.some((item) => item.id === state.playingTrackId)) {
+    stopCurrentPlayback({ silent: true });
+  }
+
   const hiddenCount = curatorTracks.filter((track) => isTrackChecked(track.id)).length;
   const filtered = state.showChecked
     ? curatorTracks
@@ -439,8 +448,29 @@ function createTrackCard(track) {
   const playButton = document.createElement('button');
   playButton.type = 'button';
   playButton.className = 'track-action-button';
-  playButton.setAttribute('aria-label', 'Play track');
-  playButton.innerHTML = '<i class=\"fa-solid fa-play\"></i>';
+  playButton.dataset.trackId = track.id;
+
+  applyPlayButtonState(playButton, getPlaybackStateForTrack(track.id));
+
+  playButton.addEventListener('click', () => {
+    const playbackState = getPlaybackStateForTrack(track.id);
+
+    if (playbackState === 'loading') {
+      return;
+    }
+
+    if (playbackState === 'playing') {
+      const wasPlaying = stopCurrentPlayback({ silent: true });
+      if (wasPlaying) {
+        const label = formatTrackLabel(track.artist, track.track);
+        setStatus(`${label} paused.`);
+        renderCards();
+      }
+      return;
+    }
+
+    handlePlayButtonClick({ track });
+  });
 
   const addButton = document.createElement('button');
   addButton.type = 'button';
@@ -485,6 +515,194 @@ function createTrackCard(track) {
   article.append(info, actions);
 
   return article;
+}
+
+function getPlaybackStateForTrack(trackId) {
+  if (!trackId || state.playingTrackId !== trackId) {
+    return 'idle';
+  }
+  if (state.isFetchingStream) {
+    return 'loading';
+  }
+  if (isTrackCurrentlyPlaying(trackId)) {
+    return 'playing';
+  }
+  return 'idle';
+}
+
+function applyPlayButtonState(button, stateValue) {
+  if (!button) return;
+  button.classList.remove('is-playing', 'is-loading');
+  button.disabled = false;
+  button.setAttribute('aria-pressed', 'false');
+
+  if (stateValue === 'loading') {
+    button.classList.add('is-loading');
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    button.setAttribute('aria-label', 'Loading stream');
+    return;
+  }
+
+  if (stateValue === 'playing') {
+    button.classList.add('is-playing');
+    button.innerHTML = '<i class="fa-solid fa-pause"></i>';
+    button.setAttribute('aria-label', 'Pause playback');
+    button.setAttribute('aria-pressed', 'true');
+    return;
+  }
+
+  button.innerHTML = '<i class="fa-solid fa-play"></i>';
+  button.setAttribute('aria-label', 'Play track');
+}
+
+function isTrackCurrentlyPlaying(trackId) {
+  if (!state.audioElement || state.playingTrackId !== trackId) {
+    return false;
+  }
+  return !state.audioElement.paused && !state.audioElement.ended;
+}
+
+async function handlePlayButtonClick({ track }) {
+  if (!track) {
+    return;
+  }
+  if (!track.url) {
+    setStatus('Streaming link unavailable for this track.');
+    return;
+  }
+
+  try {
+    await startPlayback(track);
+  } catch (error) {
+    console.error('Unexpected playback error', error);
+    setStatus('Playback failed due to an unexpected error.');
+  }
+}
+
+async function startPlayback(track) {
+  stopCurrentPlayback({ silent: true });
+
+  const controller = new AbortController();
+  state.playbackAbortController = controller;
+  state.playingTrackId = track.id;
+  state.isFetchingStream = true;
+  state.audioElement = null;
+
+  renderCards();
+
+  const label = formatTrackLabel(track.artist, track.track);
+  setStatus(`Fetching stream for ${label}...`);
+
+  try {
+    const streamUrl = await resolveStreamUrl(track.url, controller);
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    if (!streamUrl) {
+      throw new Error('Stream URL was empty.');
+    }
+
+    const audio = new Audio();
+    audio.preload = 'none';
+    audio.src = streamUrl;
+    audio.crossOrigin = 'anonymous';
+
+    audio.addEventListener('ended', () => {
+      if (state.audioElement === audio) {
+        stopCurrentPlayback({ silent: true });
+        renderCards();
+        setStatus(`${label} finished playing.`);
+      }
+    });
+
+    audio.addEventListener('error', (event) => {
+      console.error('Audio playback error', event);
+      if (state.audioElement === audio) {
+        stopCurrentPlayback({ silent: true });
+        renderCards();
+        setStatus(`Playback error for ${label}.`);
+      }
+    });
+
+    state.audioElement = audio;
+    state.isFetchingStream = false;
+    state.playbackAbortController = null;
+
+    await audio.play();
+    setStatus(`Playing ${label}.`);
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      console.error('Failed to start playback', error);
+      setStatus(`Unable to play ${formatTrackLabel(track.artist, track.track)}.`);
+      stopCurrentPlayback({ silent: true });
+    }
+  } finally {
+    state.isFetchingStream = false;
+    state.playbackAbortController = null;
+    renderCards();
+  }
+}
+
+async function resolveStreamUrl(resourceUrl, controller) {
+  const response = await fetch(resourceUrl, { signal: controller.signal });
+  if (!response.ok) {
+    throw new Error(`Resolver responded with ${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await response.json();
+    if (typeof data === 'string') {
+      return data.trim();
+    }
+    if (data && typeof data.url === 'string') {
+      return data.url.trim();
+    }
+    throw new Error('Resolver JSON did not include a url property.');
+  }
+
+  const text = await response.text();
+  return text.trim();
+}
+
+function stopCurrentPlayback({ silent = false } = {}) {
+  const controller = state.playbackAbortController;
+  const hadController = Boolean(controller);
+  if (controller) {
+    try {
+      controller.abort();
+    } catch (error) {
+      console.warn('Unable to abort playback request.', error);
+    }
+  }
+  state.playbackAbortController = null;
+
+  let wasPlaying = false;
+  if (state.audioElement) {
+    try {
+      wasPlaying = !state.audioElement.paused && !state.audioElement.ended;
+      state.audioElement.pause();
+    } catch (error) {
+      console.warn('Unable to pause audio element.', error);
+    }
+    state.audioElement.src = '';
+    if (typeof state.audioElement.load === 'function') {
+      state.audioElement.load();
+    }
+    state.audioElement = null;
+  }
+
+  const hadTrack = Boolean(state.playingTrackId);
+  state.playingTrackId = null;
+  state.isFetchingStream = false;
+
+  if (!silent) {
+    renderCards();
+  }
+
+  return wasPlaying || hadTrack || hadController;
 }
 
 async function handleAddButtonClick({ track, addButton }) {
