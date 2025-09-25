@@ -10,19 +10,20 @@ const FILTERS = [
 const state = {
   tracks: [],
   curators: [],
-  fields: [],
   counts: new Map(),
   activeCurator: null,
   activeFilter: FILTERS[0].id,
+  currentPage: 1,
+  pageSize: 20,
 };
 
 const elements = {
-  fieldList: document.querySelector('#fieldList'),
   tabList: document.querySelector('#tabList'),
   cardsContainer: document.querySelector('#cardsContainer'),
   filterButtons: document.querySelector('#filterButtons'),
   statusMessage: document.querySelector('#statusMessage'),
   refreshButton: document.querySelector('#refreshButton'),
+  pagination: document.querySelector('#paginationControls'),
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -45,7 +46,7 @@ function bindUI() {
 
   if (elements.tabList) {
     elements.tabList.addEventListener('keydown', (event) => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
         return;
       }
 
@@ -53,13 +54,13 @@ function bindUI() {
       const buttons = Array.from(elements.tabList.querySelectorAll('.tab-button'));
       if (!buttons.length) return;
 
-      const currentIndex = buttons.findIndex((btn) => btn.dataset.curator === state.activeCurator);
-      let targetIndex = currentIndex >= 0 ? currentIndex : 0;
+      const currentIndex = Math.max(0, buttons.findIndex((btn) => btn.dataset.curator === state.activeCurator));
+      let targetIndex = currentIndex;
 
-      if (event.key === 'ArrowRight') {
-        targetIndex = (targetIndex + 1) % buttons.length;
-      } else if (event.key === 'ArrowLeft') {
-        targetIndex = (targetIndex - 1 + buttons.length) % buttons.length;
+      if (event.key === 'ArrowDown') {
+        targetIndex = (currentIndex + 1) % buttons.length;
+      } else if (event.key === 'ArrowUp') {
+        targetIndex = (currentIndex - 1 + buttons.length) % buttons.length;
       } else if (event.key === 'Home') {
         targetIndex = 0;
       } else if (event.key === 'End') {
@@ -93,15 +94,15 @@ async function loadData({ force = false } = {}) {
       throw new Error('Unexpected response format; expected an array of tracks.');
     }
 
-    const { tracks, fields, counts } = normaliseData(payload);
+    const { tracks, counts } = normaliseData(payload);
 
     if (!tracks.length) {
       throw new Error('No tracks returned from the source.');
     }
 
     state.tracks = tracks;
-    state.fields = fields;
     state.counts = counts;
+    state.currentPage = 1;
     state.curators = Array.from(counts.keys()).sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: 'base' })
     );
@@ -110,7 +111,6 @@ async function loadData({ force = false } = {}) {
       state.activeCurator = state.curators[0] ?? null;
     }
 
-    renderFieldList();
     renderTabs();
     renderCards();
     setStatus(
@@ -121,16 +121,20 @@ async function loadData({ force = false } = {}) {
   } catch (error) {
     console.error(error);
     state.tracks = [];
-    state.fields = [];
+    state.currentPage = 1;
     state.curators = [];
     state.counts = new Map();
+    state.activeCurator = null;
     if (elements.tabList) {
       elements.tabList.innerHTML = '';
     }
     if (elements.cardsContainer) {
       elements.cardsContainer.innerHTML = '';
     }
-    renderFieldList();
+    if (elements.pagination) {
+      elements.pagination.innerHTML = '';
+      elements.pagination.classList.add('hidden');
+    }
     setStatus(error.message || 'Something went wrong while loading tracks.');
   } finally {
     toggleLoading(false);
@@ -138,7 +142,6 @@ async function loadData({ force = false } = {}) {
 }
 
 function normaliseData(entries) {
-  const allFields = new Set();
   const counts = new Map();
 
   const tracks = entries
@@ -146,8 +149,6 @@ function normaliseData(entries) {
       if (typeof entry !== 'object' || entry === null) {
         return null;
       }
-
-      Object.keys(entry).forEach((key) => allFields.add(key));
 
       const curator = typeof entry.curator === 'string' ? entry.curator.trim() : '';
       if (!curator) {
@@ -192,9 +193,6 @@ function normaliseData(entries) {
 
   return {
     tracks,
-    fields: Array.from(allFields).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base' })
-    ),
     counts,
   };
 }
@@ -243,17 +241,6 @@ function parseDateValue(value) {
   return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
-function renderFieldList() {
-  if (!elements.fieldList) return;
-  elements.fieldList.innerHTML = '';
-
-  if (!state.fields.length) {
-    const emptyItem = document.createElement('li');
-    emptyItem.textContent = 'No fields available';
-    elements.fieldList.appendChild(emptyItem);
-    return;
-  }
-
   const fragment = document.createDocumentFragment();
   state.fields.forEach((field) => {
     const item = document.createElement('li');
@@ -271,6 +258,8 @@ function renderTabs() {
     return;
   }
 
+  elements.tabList?.setAttribute('aria-orientation', 'vertical');
+
   const fragment = document.createDocumentFragment();
 
   state.curators.forEach((curator, index) => {
@@ -281,6 +270,7 @@ function renderTabs() {
     button.id = `tab-${slugify(curator)}-${index}`;
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', curator === state.activeCurator ? 'true' : 'false');
+    button.setAttribute('tabindex', curator === state.activeCurator ? '0' : '-1');
     button.setAttribute('aria-controls', 'cardsContainer');
     const count = state.counts.get(curator) ?? 0;
     button.textContent = `${curator} (${formatNumber(count)})`;
@@ -312,6 +302,7 @@ function renderFilters() {
     button.addEventListener('click', () => {
       if (state.activeFilter !== filter.id) {
         state.activeFilter = filter.id;
+        state.currentPage = 1;
         renderFilters();
         renderCards();
       }
@@ -328,6 +319,7 @@ function renderCards() {
   elements.cardsContainer.innerHTML = '';
 
   if (!state.activeCurator) {
+    renderPagination(0, 0);
     setStatus('Select a curator to see tracks.');
     return;
   }
@@ -337,6 +329,7 @@ function renderCards() {
     .filter(matchesActiveFilter);
 
   if (!filtered.length) {
+    renderPagination(0, 0);
     const message = document.createElement('p');
     message.className = 'status-message';
     message.textContent = 'No tracks found for the selected filters.';
@@ -345,15 +338,24 @@ function renderCards() {
     return;
   }
 
+  const totalPages = Math.ceil(filtered.length / state.pageSize) || 1;
+  state.currentPage = Math.min(Math.max(1, state.currentPage), totalPages);
+  const startIndex = (state.currentPage - 1) * state.pageSize;
+  const endIndex = startIndex + state.pageSize;
+  const pageSlice = filtered.slice(startIndex, endIndex);
+
   const fragment = document.createDocumentFragment();
 
-  filtered.forEach((track) => {
+  pageSlice.forEach((track) => {
     fragment.appendChild(createTrackCard(track));
   });
 
   elements.cardsContainer.appendChild(fragment);
+  renderPagination(totalPages, filtered.length);
   setStatus(
-    `Showing ${formatNumber(filtered.length)} track${filtered.length !== 1 ? 's' : ''} for ${state.activeCurator}.`
+    `Showing ${formatNumber(pageSlice.length)} of ${formatNumber(filtered.length)} track${
+      filtered.length !== 1 ? 's' : ''
+    } for ${state.activeCurator} (page ${state.currentPage} of ${totalPages}).`
   );
 }
 
@@ -374,7 +376,11 @@ function createTrackCard(track) {
   artist.className = 'track-artist';
   artist.textContent = track.artist || 'Unknown artist';
 
-  const meta = document.createElement('p');
+  const info = document.createElement('div');
+  info.className = 'track-info';
+  info.append(title, artist);
+
+  const meta = document.createElement('div');
   meta.className = 'track-meta';
 
   const dateBadge = createMetaBadge('Date', track.dateLabel || 'Unspecified');
@@ -382,7 +388,7 @@ function createTrackCard(track) {
 
   meta.append(dateBadge, curatorBadge);
 
-  article.append(title, artist, meta);
+  article.append(info, meta);
 
   return article;
 }
@@ -393,6 +399,49 @@ function createMetaBadge(label, value) {
   strong.textContent = label;
   badge.append(strong, document.createTextNode(` ${value}`));
   return badge;
+}
+
+function renderPagination(totalPages, totalItems) {
+  if (!elements.pagination) return;
+  elements.pagination.innerHTML = '';
+
+  if (totalPages <= 1 || totalItems <= state.pageSize) {
+    elements.pagination.classList.add('hidden');
+    return;
+  }
+
+  elements.pagination.classList.remove('hidden');
+
+  const fragment = document.createDocumentFragment();
+
+  const prevButton = document.createElement('button');
+  prevButton.type = 'button';
+  prevButton.textContent = 'Previous';
+  prevButton.disabled = state.currentPage === 1;
+  prevButton.addEventListener('click', () => {
+    if (state.currentPage > 1) {
+      state.currentPage -= 1;
+      renderCards();
+    }
+  });
+
+  const indicator = document.createElement('span');
+  indicator.className = 'page-indicator';
+  indicator.textContent = `Page ${state.currentPage} of ${totalPages}`;
+
+  const nextButton = document.createElement('button');
+  nextButton.type = 'button';
+  nextButton.textContent = 'Next';
+  nextButton.disabled = state.currentPage >= totalPages;
+  nextButton.addEventListener('click', () => {
+    if (state.currentPage < totalPages) {
+      state.currentPage += 1;
+      renderCards();
+    }
+  });
+
+  fragment.append(prevButton, indicator, nextButton);
+  elements.pagination.appendChild(fragment);
 }
 
 function matchesActiveFilter(track) {
@@ -412,8 +461,16 @@ function matchesActiveFilter(track) {
 
 function setActiveCurator(curator) {
   state.activeCurator = curator;
+  state.currentPage = 1;
   renderTabs();
   renderCards();
+  focusActiveTab();
+}
+
+function focusActiveTab() {
+  if (!elements.tabList) return;
+  const activeButton = elements.tabList.querySelector('.tab-button.active');
+  activeButton?.focus();
 }
 
 function setStatus(message) {

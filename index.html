@@ -18,25 +18,27 @@
         </div>
       </header>
 
-      <main class="container">
-        <section class="fields-panel" aria-labelledby="fields-title">
-          <div class="fields-heading">
-            <h2 id="fields-title">Available Fields</h2>
+      <main class="layout container">
+        <aside class="curator-panel" aria-label="Curator selector">
+          <div class="curator-panel__heading">
+            <h2>Curators</h2>
+          </div>
+          <div id="tabList" class="tab-list" role="tablist" aria-orientation="vertical"></div>
+        </aside>
+
+        <div class="content-column">
+          <div class="toolbar">
             <button id="refreshButton" class="refresh-button" type="button" aria-live="polite">Refresh</button>
           </div>
-          <ul id="fieldList" class="field-list"></ul>
-        </section>
 
-        <section class="tabs-panel" aria-label="Curator selector">
-          <div id="tabList" class="tab-list" role="tablist"></div>
-        </section>
+          <section class="filters-panel" aria-label="Date filters">
+            <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
+          </section>
 
-        <section class="filters-panel" aria-label="Date filters">
-          <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
-        </section>
-
-        <section id="cardsContainer" class="cards-grid" aria-live="polite"></section>
-        <p id="statusMessage" class="status-message" role="status"></p>
+          <section id="cardsContainer" class="cards-grid" aria-live="polite"></section>
+          <div id="paginationControls" class="pagination" aria-label="Pagination"></div>
+          <p id="statusMessage" class="status-message" role="status"></p>
+        </div>
       </main>
     </div>
 
