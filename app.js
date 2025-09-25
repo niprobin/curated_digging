@@ -1,4 +1,5 @@
 const DATA_URL = 'https://opensheet.elk.sh/19q7ac_1HikdJK_mAoItd65khDHi0pNCR8PrdIcR6Fhc/all_tracks';
+const WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/add-to-radio';
 
 const FILTERS = [
   { id: 'all', label: 'See all', days: null },
@@ -241,15 +242,6 @@ function parseDateValue(value) {
   return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
-  const fragment = document.createDocumentFragment();
-  state.fields.forEach((field) => {
-    const item = document.createElement('li');
-    item.textContent = field;
-    fragment.appendChild(item);
-  });
-  elements.fieldList.appendChild(fragment);
-}
-
 function renderTabs() {
   if (!elements.tabList) return;
   elements.tabList.innerHTML = '';
@@ -273,7 +265,7 @@ function renderTabs() {
     button.setAttribute('tabindex', curator === state.activeCurator ? '0' : '-1');
     button.setAttribute('aria-controls', 'cardsContainer');
     const count = state.counts.get(curator) ?? 0;
-    button.textContent = `${curator} (${formatNumber(count)})`;
+    button.textContent = `${curator}`;
 
     button.addEventListener('click', () => {
       if (curator !== state.activeCurator) {
@@ -376,29 +368,100 @@ function createTrackCard(track) {
   artist.className = 'track-artist';
   artist.textContent = track.artist || 'Unknown artist';
 
+  const dateLine = document.createElement('p');
+  dateLine.className = 'track-date';
+  dateLine.textContent = track.dateLabel ? `Date: ${track.dateLabel}` : 'Date: Unspecified';
+
   const info = document.createElement('div');
   info.className = 'track-info';
-  info.append(title, artist);
+  info.append(title, artist, dateLine);
 
-  const meta = document.createElement('div');
-  meta.className = 'track-meta';
+  const actions = document.createElement('div');
+  actions.className = 'track-actions';
 
-  const dateBadge = createMetaBadge('Date', track.dateLabel || 'Unspecified');
-  const curatorBadge = createMetaBadge('Curator', track.curator || 'Unknown');
+  const playButton = document.createElement('button');
+  playButton.type = 'button';
+  playButton.className = 'track-action-button';
+  playButton.setAttribute('aria-label', 'Play track');
+  playButton.innerHTML = '<i class=\"fa-solid fa-play\"></i>';
 
-  meta.append(dateBadge, curatorBadge);
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'track-action-button';
+  addButton.setAttribute('aria-label', 'Add track');
+  addButton.innerHTML = '<i class=\"fa-solid fa-plus\"></i>';
 
-  article.append(info, meta);
+  const statusButton = document.createElement('button');
+  statusButton.type = 'button';
+  statusButton.className = 'track-action-button status-button';
+  statusButton.setAttribute('aria-label', 'Mark track as checked');
+  statusButton.setAttribute('aria-pressed', 'false');
+  statusButton.innerHTML = '<i class=\"fa-solid fa-check\"></i>';
+
+  const setStatusChecked = (checked) => {
+    statusButton.classList.toggle('is-checked', checked);
+    statusButton.setAttribute('aria-pressed', checked ? 'true' : 'false');
+  };
+
+  setStatusChecked(false);
+
+  statusButton.addEventListener('click', () => {
+    const nextState = !statusButton.classList.contains('is-checked');
+    setStatusChecked(nextState);
+  });
+
+  addButton.addEventListener('click', () => {
+    handleAddButtonClick({ track, addButton, setStatusChecked });
+  });
+
+  actions.append(playButton, addButton, statusButton);
+
+  article.append(info, actions);
 
   return article;
 }
 
-function createMetaBadge(label, value) {
-  const badge = document.createElement('span');
-  const strong = document.createElement('strong');
-  strong.textContent = label;
-  badge.append(strong, document.createTextNode(` ${value}`));
-  return badge;
+async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
+  if (!track || !addButton) return;
+
+  const label = formatTrackLabel(track);
+
+  try {
+    addButton.disabled = true;
+    addButton.classList.add('is-busy');
+    addButton.setAttribute('aria-busy', 'true');
+    setStatus(`Adding ${label} to the radio queue...`);
+
+    await postTrackToWebhook(label);
+
+    setStatusChecked(true);
+    setStatus(`${label} sent to the radio queue.`);
+  } catch (error) {
+    console.error(error);
+    setStatus('Unable to add the track right now. Please try again.');
+  } finally {
+    addButton.disabled = false;
+    addButton.classList.remove('is-busy');
+    addButton.removeAttribute('aria-busy');
+  }
+}
+
+async function postTrackToWebhook(value) {
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ track: value }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Webhook responded with ${response.status}`);
+  }
+}
+
+function formatTrackLabel(track) {
+  const artist = track.artist || 'Unknown Artist';
+  const title = track.track || 'Untitled Track';
+  return `${artist} - ${title}`;
 }
 
 function renderPagination(totalPages, totalItems) {
@@ -422,6 +485,7 @@ function renderPagination(totalPages, totalItems) {
     if (state.currentPage > 1) {
       state.currentPage -= 1;
       renderCards();
+      scrollToGrid();
     }
   });
 
@@ -437,6 +501,7 @@ function renderPagination(totalPages, totalItems) {
     if (state.currentPage < totalPages) {
       state.currentPage += 1;
       renderCards();
+      scrollToGrid();
     }
   });
 
@@ -471,6 +536,12 @@ function focusActiveTab() {
   if (!elements.tabList) return;
   const activeButton = elements.tabList.querySelector('.tab-button.active');
   activeButton?.focus();
+}
+
+function scrollToGrid() {
+  if (!elements.cardsContainer) return;
+  const top = window.scrollY + elements.cardsContainer.getBoundingClientRect().top - 16;
+  window.scrollTo({ top, behavior: 'smooth' });
 }
 
 function setStatus(message) {

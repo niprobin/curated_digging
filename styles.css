@@ -7,6 +7,8 @@
   --color-border: rgba(55, 92, 162, 0.38);
   --color-primary: #3b82f6;
   --color-primary-strong: #60a5fa;
+  --color-success: #2dd4bf;
+  --color-success-strong: #5eead4;
   --color-text: #f4f7fb;
   --color-muted: rgba(209, 218, 235, 0.72);
   --shadow-elevated: 0 28px 56px rgba(0, 0, 0, 0.55);
@@ -45,10 +47,6 @@ body {
   padding: 60px 0 36px;
   background: linear-gradient(175deg, rgba(6, 10, 18, 0.95), rgba(2, 4, 8, 0.7));
   border-bottom: 1px solid rgba(59, 130, 246, 0.22);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  backdrop-filter: blur(14px);
 }
 
 .site-header h1 {
@@ -57,6 +55,24 @@ body {
   font-weight: 700;
   letter-spacing: -0.02em;
 }
+
+.site-header .container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header-bar h1 {
+  margin: 0;
+}
+
 
 .tagline {
   margin-top: 12px;
@@ -89,7 +105,7 @@ body {
 
 .curator-panel__heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
 }
 
@@ -102,7 +118,7 @@ body {
 .tab-list {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 10px;
   padding-right: 6px;
   overflow-y: auto;
@@ -110,17 +126,20 @@ body {
 }
 
 .tab-button {
-  display: block;
-  width: 100%;
-  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
   color: var(--color-muted);
   background: rgba(6, 10, 18, 0.75);
   border: 1px solid rgba(59, 130, 246, 0.24);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
-  font-size: 0.95rem;
-  font-weight: 500;
+  padding: 10px 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   cursor: pointer;
+  white-space: nowrap;
   transition: color var(--transition-base), background var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
@@ -145,14 +164,6 @@ body {
   gap: 28px;
 }
 
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
 .filters-panel {
   background: var(--color-surface);
   padding: 22px clamp(18px, 3vw, 32px);
@@ -170,6 +181,7 @@ body {
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
   transition: background var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
@@ -196,6 +208,7 @@ body {
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
   transition: background var(--transition-base), color var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
@@ -217,9 +230,14 @@ body {
 .cards-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  max-width: min(720px, 100%);
-  margin: 0 auto;
+  grid-template-columns: 1fr;
+  width: 100%;
+}
+
+@media (min-width: 720px) {
+  .cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .track-card {
@@ -230,10 +248,8 @@ body {
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 18px;
-  min-height: 70px;
-  max-height: 70px;
-  overflow: hidden;
   transition: transform 200ms ease, border-color var(--transition-base), box-shadow 220ms ease;
 }
 
@@ -248,7 +264,60 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+}
+
+.track-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.track-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  background: rgba(6, 10, 18, 0.65);
+  color: var(--color-primary-strong);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
+}
+
+.track-action-button:hover,
+.track-action-button:focus {
+  outline: none;
+  background: rgba(59, 130, 246, 0.4);
+  border-color: rgba(125, 195, 255, 0.8);
+  color: var(--color-text);
+  transform: translateY(-2px);
+}
+
+.track-action-button i {
+  pointer-events: none;
+}
+
+.track-action-button.is-busy {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.track-action-button.status-button.is-checked {
+  background: rgba(45, 212, 191, 0.2);
+  border-color: rgba(45, 212, 191, 0.65);
+  color: var(--color-success-strong);
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.25);
+}
+
+.track-action-button.status-button.is-checked:hover,
+.track-action-button.status-button.is-checked:focus {
+  background: rgba(45, 212, 191, 0.35);
+  border-color: rgba(94, 234, 212, 0.9);
+  color: #f0fffb;
 }
 
 .track-title {
@@ -257,7 +326,6 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
 
@@ -267,35 +335,19 @@ body {
   color: var(--color-primary-strong);
   font-weight: 500;
   white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.track-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
+.track-date {
   margin: 0;
-  flex-shrink: 0;
-}
-
-.track-meta span {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(8, 12, 20, 0.92);
-  border: 1px solid rgba(59, 130, 246, 0.28);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-
-.track-meta span strong {
-  font-weight: 600;
-  margin-right: 4px;
+  font-size: 0.75rem;
   color: var(--color-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
+
+
+
 
 .pagination {
   display: flex;
@@ -314,6 +366,7 @@ body {
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
   transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
 }
 
@@ -377,7 +430,6 @@ body {
 
   .cards-grid {
     grid-template-columns: 1fr;
-    max-width: 100%;
   }
 
   .track-card {
