@@ -424,7 +424,8 @@ function createTrackCard(track) {
 async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
   if (!track || !addButton) return;
 
-  const label = formatTrackLabel(track);
+  const payload = buildTrackPayload(track);
+  const label = formatTrackLabel(payload.artist, payload.title);
 
   try {
     addButton.disabled = true;
@@ -432,13 +433,13 @@ async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
     addButton.setAttribute('aria-busy', 'true');
     setStatus(`Adding ${label} to the radio queue...`);
 
-    await postTrackToWebhook(label);
+    await postTrackToWebhook(payload);
 
     setStatusChecked(true);
     setStatus(`${label} sent to the radio queue.`);
   } catch (error) {
     console.error(error);
-    setStatus('Unable to add the track right now. Please try again.');
+    setStatus(`Unable to add ${label}. Please try again.`);
   } finally {
     addButton.disabled = false;
     addButton.classList.remove('is-busy');
@@ -446,11 +447,11 @@ async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
   }
 }
 
-async function postTrackToWebhook(value) {
+async function postTrackToWebhook(payload) {
   const response = await fetch(WEBHOOK_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ track: value }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -458,10 +459,18 @@ async function postTrackToWebhook(value) {
   }
 }
 
-function formatTrackLabel(track) {
-  const artist = track.artist || 'Unknown Artist';
-  const title = track.track || 'Untitled Track';
-  return `${artist} - ${title}`;
+function buildTrackPayload(track) {
+  return {
+    artist: track?.artist || "Unknown Artist",
+    title: track?.track || "Untitled Track",
+    spotify_id: track?.spotifyId || "",
+  };
+}
+
+function formatTrackLabel(artist, title) {
+  const safeArtist = artist || "Unknown Artist";
+  const safeTitle = title || "Untitled Track";
+  return `${safeArtist} - ${safeTitle}`;
 }
 
 function renderPagination(totalPages, totalItems) {
