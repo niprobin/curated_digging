@@ -212,6 +212,10 @@ body {
   transition: background var(--transition-base), color var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
+.filter-button--checked-toggle {
+  order: 99;
+}
+
 .filter-button:hover,
 .filter-button:focus {
   outline: none;

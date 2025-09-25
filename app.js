@@ -1,5 +1,11 @@
-const DATA_URL = 'https://opensheet.elk.sh/19q7ac_1HikdJK_mAoItd65khDHi0pNCR8PrdIcR6Fhc/all_tracks';
+const DATA_SOURCE_URL = 'https://opensheet.elk.sh/19q7ac_1HikdJK_mAoItd65khDHi0pNCR8PrdIcR6Fhc/all_tracks';
+const API_URL = '/.netlify/functions/tracks';
 const WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/add-to-radio';
+
+const STORAGE_KEYS = {
+  checked: 'curatedDigging:checkedTracks',
+  showChecked: 'curatedDigging:showChecked',
+};
 
 const FILTERS = [
   { id: 'all', label: 'See all', days: null },
@@ -16,6 +22,8 @@ const state = {
   activeFilter: FILTERS[0].id,
   currentPage: 1,
   pageSize: 20,
+  checkedTracks: new Set(),
+  showChecked: false,
 };
 
 const elements = {
@@ -32,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.cardsContainer.setAttribute('role', 'tabpanel');
     elements.cardsContainer.setAttribute('tabindex', '0');
   }
+  initializeCheckedState();
   bindUI();
   loadData();
 });
@@ -85,12 +94,7 @@ async function loadData({ force = false } = {}) {
   setStatus('Fetching tracks...');
 
   try {
-    const response = await fetch(`${DATA_URL}${force ? `?t=${Date.now()}` : ''}`);
-    if (!response.ok) {
-      throw new Error(`Failed to load tracks: ${response.status} ${response.statusText}`);
-    }
-
-    const payload = await response.json();
+    const payload = await requestTracks({ force });
     if (!Array.isArray(payload)) {
       throw new Error('Unexpected response format; expected an array of tracks.');
     }
@@ -103,6 +107,7 @@ async function loadData({ force = false } = {}) {
 
     state.tracks = tracks;
     state.counts = counts;
+    pruneCheckedTracks(tracks);
     state.currentPage = 1;
     state.curators = Array.from(counts.keys()).sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -310,6 +315,7 @@ function renderFilters() {
     button.className = `filter-button${filter.id === state.activeFilter ? ' active' : ''}`;
     button.dataset.filterId = filter.id;
     button.textContent = filter.label;
+    button.setAttribute('aria-pressed', filter.id === state.activeFilter ? 'true' : 'false');
 
     button.addEventListener('click', () => {
       if (state.activeFilter !== filter.id) {
@@ -322,6 +328,21 @@ function renderFilters() {
 
     fragment.appendChild(button);
   });
+
+  const toggleButton = document.createElement('button');
+  toggleButton.type = 'button';
+  toggleButton.className = `filter-button filter-button--checked-toggle${state.showChecked ? ' active' : ''}`;
+  toggleButton.textContent = state.showChecked ? 'Hide checked tracks' : 'Show checked tracks';
+  toggleButton.setAttribute('aria-pressed', state.showChecked ? 'true' : 'false');
+  toggleButton.addEventListener('click', () => {
+    state.showChecked = !state.showChecked;
+    persistShowCheckedPreference(state.showChecked);
+    state.currentPage = 1;
+    renderFilters();
+    renderCards();
+  });
+
+  fragment.appendChild(toggleButton);
 
   elements.filterButtons.appendChild(fragment);
 }
@@ -336,17 +357,27 @@ function renderCards() {
     return;
   }
 
-  const filtered = state.tracks
+  const curatorTracks = state.tracks
     .filter((track) => track.curator === state.activeCurator)
     .filter(matchesActiveFilter);
+  const hiddenCount = curatorTracks.filter((track) => isTrackChecked(track.id)).length;
+  const filtered = state.showChecked
+    ? curatorTracks
+    : curatorTracks.filter((track) => !isTrackChecked(track.id));
 
   if (!filtered.length) {
     renderPagination(0, 0);
     const message = document.createElement('p');
     message.className = 'status-message';
-    message.textContent = 'No tracks found for the selected filters.';
+    message.textContent = state.showChecked
+      ? 'No tracks found for the selected filters.'
+      : 'No unchecked tracks found for the selected filters.';
     elements.cardsContainer.appendChild(message);
-    setStatus(`No tracks to show for ${state.activeCurator} with the current filter.`);
+    setStatus(
+      state.showChecked
+        ? `No tracks to show for ${state.activeCurator} with the current filter.`
+        : `All tracks for ${state.activeCurator} are marked as checked.`
+    );
     return;
   }
 
@@ -364,11 +395,17 @@ function renderCards() {
 
   elements.cardsContainer.appendChild(fragment);
   renderPagination(totalPages, filtered.length);
-  setStatus(
-    `Showing ${formatNumber(pageSlice.length)} of ${formatNumber(filtered.length)} track${
-      filtered.length !== 1 ? 's' : ''
-    } for ${state.activeCurator} (page ${state.currentPage} of ${totalPages}).`
-  );
+  const visibleLabel = state.showChecked ? 'tracks' : 'unchecked tracks';
+  const visibleCount = filtered.length;
+  const totalMatches = curatorTracks.length;
+  const baseMessage = `Showing ${formatNumber(pageSlice.length)} of ${formatNumber(visibleCount)} ${visibleLabel} for ${state.activeCurator} (page ${state.currentPage} of ${totalPages}).`;
+  let hiddenMessage = '';
+  if (hiddenCount > 0) {
+    hiddenMessage = state.showChecked
+      ? ` ${formatNumber(hiddenCount)} track${hiddenCount !== 1 ? 's are' : ' is'} marked as checked.`
+      : ` ${formatNumber(hiddenCount)} of ${formatNumber(totalMatches)} track${hiddenCount !== 1 ? 's are' : ' is'} hidden because they are checked.`;
+  }
+  setStatus(baseMessage + hiddenMessage);
 }
 
 function createTrackCard(track) {
@@ -418,20 +455,29 @@ function createTrackCard(track) {
   statusButton.setAttribute('aria-pressed', 'false');
   statusButton.innerHTML = '<i class=\"fa-solid fa-check\"></i>';
 
-  const setStatusChecked = (checked) => {
+  const trackId = track.id;
+  const setStatusButtonState = (checked) => {
     statusButton.classList.toggle('is-checked', checked);
     statusButton.setAttribute('aria-pressed', checked ? 'true' : 'false');
+    statusButton.setAttribute(
+      'aria-label',
+      checked ? 'Unmark track as checked' : 'Mark track as checked'
+    );
   };
 
-  setStatusChecked(false);
+  setStatusButtonState(isTrackChecked(trackId));
 
   statusButton.addEventListener('click', () => {
-    const nextState = !statusButton.classList.contains('is-checked');
-    setStatusChecked(nextState);
+    const nextState = !isTrackChecked(trackId);
+    const changed = setTrackChecked(trackId, nextState);
+    if (changed) {
+      const label = formatTrackLabel(track.artist, track.track);
+      setStatus(nextState ? `${label} marked as checked.` : `${label} marked as unchecked.`);
+    }
   });
 
   addButton.addEventListener('click', () => {
-    handleAddButtonClick({ track, addButton, setStatusChecked });
+    handleAddButtonClick({ track, addButton });
   });
 
   actions.append(playButton, addButton, statusButton);
@@ -441,11 +487,12 @@ function createTrackCard(track) {
   return article;
 }
 
-async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
+async function handleAddButtonClick({ track, addButton }) {
   if (!track || !addButton) return;
 
   const payload = buildTrackPayload(track);
   const label = formatTrackLabel(payload.artist, payload.title);
+  const trackId = track.id;
 
   try {
     addButton.disabled = true;
@@ -455,13 +502,17 @@ async function handleAddButtonClick({ track, addButton, setStatusChecked }) {
 
     await postTrackToWebhook(payload);
 
-    setStatusChecked(true);
-    setStatus(`${label} sent to the radio queue.`);
+    const changed = setTrackChecked(trackId, true);
+    setStatus(
+      `${label} sent to the radio queue ${changed ? 'and marked as checked.' : 'and was already checked.'}`
+    );
   } catch (error) {
     console.error(error);
     setStatus(`Unable to add ${label}. Please try again.`);
   } finally {
-    addButton.disabled = false;
+    if (state.showChecked || !isTrackChecked(trackId)) {
+      addButton.disabled = false;
+    }
     addButton.classList.remove('is-busy');
     addButton.removeAttribute('aria-busy');
   }
@@ -538,6 +589,174 @@ function renderPagination(totalPages, totalItems) {
   elements.pagination.appendChild(fragment);
 }
 
+async function requestTracks({ force = false } = {}) {
+  const apiUrl = new URL(API_URL, window.location.origin);
+  if (force) {
+    apiUrl.searchParams.set('force', '1');
+  }
+
+  try {
+    const response = await fetch(apiUrl.toString(), {
+      headers: { Accept: 'application/json' },
+    });
+
+    if (response.ok) {
+      return await response.json();
+    }
+
+    if (response.status !== 404) {
+      const message = await response.text().catch(() => '');
+      throw new Error(
+        message
+          ? `API responded with ${response.status}: ${message}`
+          : `API responded with ${response.status}`
+      );
+    }
+  } catch (error) {
+    console.warn('Track API unavailable, falling back to source fetch.', error);
+  }
+
+  const fallbackUrl = DATA_SOURCE_URL + (force ? `?t=${Date.now()}` : '');
+  const fallbackResponse = await fetch(fallbackUrl);
+  if (!fallbackResponse.ok) {
+    throw new Error(
+      `Failed to load tracks: ${fallbackResponse.status} ${fallbackResponse.statusText}`
+    );
+  }
+  return await fallbackResponse.json();
+}
+
+
+function initializeCheckedState() {
+  state.checkedTracks = loadCheckedTracksFromStorage();
+  state.showChecked = loadShowCheckedPreference();
+}
+
+function loadCheckedTracksFromStorage() {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return new Set();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.checked);
+    if (!raw) {
+      return new Set();
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+
+    return new Set(parsed.map((value) => String(value)).filter((value) => value));
+  } catch (error) {
+    console.warn('Unable to read checked tracks from storage.', error);
+    return new Set();
+  }
+}
+
+function persistCheckedTracks() {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+
+  try {
+    const serialised = JSON.stringify(Array.from(state.checkedTracks));
+    window.localStorage.setItem(STORAGE_KEYS.checked, serialised);
+  } catch (error) {
+    console.warn('Unable to persist checked tracks.', error);
+  }
+}
+
+function loadShowCheckedPreference() {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return false;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.showChecked);
+    if (raw == null) {
+      return false;
+    }
+    const normalised = raw.toLowerCase();
+    return normalised === 'true' || normalised === '1' || normalised === 'yes';
+  } catch (error) {
+    console.warn('Unable to read show-checked preference from storage.', error);
+    return false;
+  }
+}
+
+function persistShowCheckedPreference(value) {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.showChecked, value ? 'true' : 'false');
+  } catch (error) {
+    console.warn('Unable to persist show-checked preference.', error);
+  }
+}
+
+function isTrackChecked(trackId) {
+  if (trackId == null) {
+    return false;
+  }
+  return state.checkedTracks.has(String(trackId));
+}
+
+function setTrackChecked(trackId, checked) {
+  if (trackId == null) {
+    return;
+  }
+
+  const normalised = String(trackId);
+  const alreadyChecked = state.checkedTracks.has(normalised);
+  let changed = false;
+
+  if (checked) {
+    if (!alreadyChecked) {
+      state.checkedTracks.add(normalised);
+      changed = true;
+    }
+  } else if (alreadyChecked) {
+    state.checkedTracks.delete(normalised);
+    changed = true;
+  }
+
+  if (changed) {
+    persistCheckedTracks();
+    renderCards();
+  }
+
+  return changed;
+}
+
+function pruneCheckedTracks(tracks) {
+  if (!Array.isArray(tracks) || !tracks.length) {
+    return;
+  }
+
+  const validIds = new Set(
+    tracks
+      .map((track) => (track ? track.id : null))
+      .filter((id) => id != null)
+      .map((id) => String(id))
+  );
+  let changed = false;
+
+  state.checkedTracks.forEach((id) => {
+    if (!validIds.has(id)) {
+      state.checkedTracks.delete(id);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    persistCheckedTracks();
+  }
+}
+
 function matchesActiveFilter(track) {
   const filter = FILTERS.find((item) => item.id === state.activeFilter);
   if (!filter || filter.days == null) {
@@ -602,3 +821,4 @@ function slugify(value) {
 function formatNumber(value) {
   return new Intl.NumberFormat().format(value);
 }
+
