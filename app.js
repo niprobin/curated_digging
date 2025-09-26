@@ -1,6 +1,7 @@
 const DATA_SOURCE_URL = 'https://opensheet.elk.sh/19q7ac_1HikdJK_mAoItd65khDHi0pNCR8PrdIcR6Fhc/all_tracks';
 const API_URL = '/.netlify/functions/tracks';
 const WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/add-to-radio';
+const STATUS_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/track-checked';
 
 const STORAGE_KEYS = {
   checked: 'curatedDigging:checkedTracks',
@@ -498,12 +499,27 @@ function createTrackCard(track) {
 
   setStatusButtonState(isTrackChecked(trackId));
 
-  statusButton.addEventListener('click', () => {
+  statusButton.addEventListener('click', async () => {
     const nextState = !isTrackChecked(trackId);
-    const changed = setTrackChecked(trackId, nextState);
-    if (changed) {
-      const label = formatTrackLabel(track.artist, track.track);
-      setStatus(nextState ? `${label} marked as checked.` : `${label} marked as unchecked.`);
+    const label = formatTrackLabel(track.artist, track.track);
+
+    statusButton.disabled = true;
+    statusButton.classList.add('is-busy');
+    statusButton.setAttribute('aria-busy', 'true');
+
+    try {
+      await postTrackCheckedStatus({ track, checked: nextState });
+      const changed = setTrackChecked(trackId, nextState);
+      if (changed) {
+        setStatus(nextState ? `${label} marked as checked.` : `${label} marked as unchecked.`);
+      }
+    } catch (error) {
+      console.error('Unable to update track checked status.', error);
+      setStatus(`Unable to update status for ${label}. Please try again.`);
+    } finally {
+      statusButton.disabled = false;
+      statusButton.classList.remove('is-busy');
+      statusButton.removeAttribute('aria-busy');
     }
   });
 
@@ -826,6 +842,25 @@ async function postTrackToWebhook(payload) {
   }
 }
 
+async function postTrackCheckedStatus({ track, checked }) {
+  const payload = {
+    'spotify-id': track?.spotifyId || '',
+    artist: track?.artist || 'Unknown Artist',
+    title: track?.track || 'Untitled Track',
+    checked: Boolean(checked),
+  };
+
+  const response = await fetch(STATUS_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Status webhook responded with ${response.status}`);
+  }
+}
+
 function buildTrackPayload(track) {
   return {
     artist: track?.artist || "Unknown Artist",
@@ -1096,7 +1131,7 @@ function setStatus(message) {
 function toggleLoading(isLoading) {
   if (!elements.refreshButton) return;
   elements.refreshButton.disabled = isLoading;
-  elements.refreshButton.textContent = isLoading ? 'Refreshing...' : 'Refresh';
+  elements.refreshButton.textContent = isLoading ? 'IN PROGRESS' : 'REFRESH';
   if (isLoading) {
     elements.refreshButton.setAttribute('aria-busy', 'true');
   } else {

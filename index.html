@@ -12,15 +12,12 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="site-header">
-        <div class="container">
-          <div class="header-bar">
-            <h1>Curated Digging</h1>
-            <button id="refreshButton" class="refresh-button" type="button" aria-live="polite">Refresh</button>
-          </div>
-          <p class="tagline">Browse every track gathered in the shared crate, curator by curator.</p>
+      <section class="filters-bar" aria-label="Track controls">
+        <div class="filters-panel">
+          <button id="refreshButton" class="refresh-button" type="button" aria-live="polite"><i class="fa-solid fa-arrows-rotate"></i></button>
+          <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
         </div>
-      </header>
+      </section>
 
       <main class="layout container">
         <aside class="curator-panel" aria-label="Curator selector">
@@ -31,10 +28,6 @@
         </aside>
 
         <div class="content-column">
-          <section class="filters-panel" aria-label="Date filters">
-            <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
-          </section>
-
           <section id="cardsContainer" class="cards-grid" aria-live="polite"></section>
           <div id="paginationControls" class="pagination" aria-label="Pagination"></div>
           <p id="statusMessage" class="status-message" role="status"></p>
