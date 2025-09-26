@@ -217,12 +217,6 @@ body {
   width: 100%;
 }
 
-@media (min-width: 720px) {
-  .cards-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .track-card {
   padding: 16px 18px;
   background: var(--color-card);
@@ -505,4 +499,5 @@ body {
     padding: 14px 16px;
   }
 }
+
 
