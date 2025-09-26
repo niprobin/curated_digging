@@ -24,10 +24,12 @@ const state = {
   pageSize: 20,
   checkedTracks: new Set(),
   showChecked: false,
-  audioElement: null,
-  playingTrackId: null,
-  isFetchingStream: false,
-  playbackAbortController: null,
+  lookupTrackId: null,
+  isFetchingLookup: false,
+  lookupRequestId: null,
+  lookupAbortController: null,
+  lookupButton: null,
+  activeTooltip: null,
 };
 
 const elements = {
@@ -365,8 +367,23 @@ function renderCards() {
     .filter((track) => track.curator === state.activeCurator)
     .filter(matchesActiveFilter);
 
-  if (state.playingTrackId && !curatorTracks.some((item) => item.id === state.playingTrackId)) {
-    stopCurrentPlayback({ silent: true });
+  if (state.activeTooltip && !curatorTracks.some((item) => item.id === state.activeTooltip.trackId)) {
+    closeActiveTooltip({ shouldResetButton: false });
+  }
+
+  if (state.lookupTrackId && !curatorTracks.some((item) => item.id === state.lookupTrackId)) {
+    if (state.lookupAbortController) {
+      try {
+        state.lookupAbortController.abort();
+      } catch (error) {
+        console.warn('Unable to abort lookup request during rerender.', error);
+      }
+    }
+    state.lookupTrackId = null;
+    state.isFetchingLookup = false;
+    state.lookupRequestId = null;
+    state.lookupAbortController = null;
+    state.lookupButton = null;
   }
 
   const hiddenCount = curatorTracks.filter((track) => isTrackChecked(track.id)).length;
@@ -450,26 +467,10 @@ function createTrackCard(track) {
   playButton.className = 'track-action-button';
   playButton.dataset.trackId = track.id;
 
-  applyPlayButtonState(playButton, getPlaybackStateForTrack(track.id));
+  applyLookupButtonState(playButton, getLookupStateForTrack(track.id));
 
   playButton.addEventListener('click', () => {
-    const playbackState = getPlaybackStateForTrack(track.id);
-
-    if (playbackState === 'loading') {
-      return;
-    }
-
-    if (playbackState === 'playing') {
-      const wasPlaying = stopCurrentPlayback({ silent: true });
-      if (wasPlaying) {
-        const label = formatTrackLabel(track.artist, track.track);
-        setStatus(`${label} paused.`);
-        renderCards();
-      }
-      return;
-    }
-
-    handlePlayButtonClick({ track });
+    handlePlayButtonClick({ track, playButton });
   });
 
   const addButton = document.createElement('button');
@@ -517,22 +518,22 @@ function createTrackCard(track) {
   return article;
 }
 
-function getPlaybackStateForTrack(trackId) {
-  if (!trackId || state.playingTrackId !== trackId) {
+function getLookupStateForTrack(trackId) {
+  if (!trackId) {
     return 'idle';
   }
-  if (state.isFetchingStream) {
+  if (state.lookupTrackId === trackId && state.isFetchingLookup) {
     return 'loading';
   }
-  if (isTrackCurrentlyPlaying(trackId)) {
-    return 'playing';
+  if (state.activeTooltip && state.activeTooltip.trackId === trackId) {
+    return 'active';
   }
   return 'idle';
 }
 
-function applyPlayButtonState(button, stateValue) {
+function applyLookupButtonState(button, stateValue) {
   if (!button) return;
-  button.classList.remove('is-playing', 'is-loading');
+  button.classList.remove('is-loading', 'is-active');
   button.disabled = false;
   button.setAttribute('aria-pressed', 'false');
 
@@ -540,169 +541,246 @@ function applyPlayButtonState(button, stateValue) {
     button.classList.add('is-loading');
     button.disabled = true;
     button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    button.setAttribute('aria-label', 'Loading stream');
+    button.setAttribute('aria-label', 'Fetching track info');
     return;
   }
 
-  if (stateValue === 'playing') {
-    button.classList.add('is-playing');
-    button.innerHTML = '<i class="fa-solid fa-pause"></i>';
-    button.setAttribute('aria-label', 'Pause playback');
+  if (stateValue === 'active') {
+    button.classList.add('is-active');
+    button.innerHTML = '<i class="fa-solid fa-arrow-up-from-bracket"></i>';
     button.setAttribute('aria-pressed', 'true');
+    button.setAttribute('aria-label', 'Hide track info');
     return;
   }
 
-  button.innerHTML = '<i class="fa-solid fa-play"></i>';
+  button.innerHTML = '<i class="fa-solid fa-arrow-up-from-bracket"></i>';
   button.setAttribute('aria-label', 'Play track');
 }
 
-function isTrackCurrentlyPlaying(trackId) {
-  if (!state.audioElement || state.playingTrackId !== trackId) {
-    return false;
-  }
-  return !state.audioElement.paused && !state.audioElement.ended;
-}
-
-async function handlePlayButtonClick({ track }) {
-  if (!track) {
-    return;
-  }
-  if (!track.url) {
-    setStatus('Streaming link unavailable for this track.');
+async function handlePlayButtonClick({ track, playButton }) {
+  if (!track || !playButton) {
     return;
   }
 
-  try {
-    await startPlayback(track);
-  } catch (error) {
-    console.error('Unexpected playback error', error);
-    setStatus('Playback failed due to an unexpected error.');
-  }
-}
+  closeActiveTooltip();
 
-async function startPlayback(track) {
-  stopCurrentPlayback({ silent: true });
+  if (state.lookupAbortController) {
+    try {
+      state.lookupAbortController.abort();
+    } catch (error) {
+      console.warn('Unable to abort lookup request.', error);
+    }
+  }
+
+  const requestId = Symbol('lookup-request');
+  state.lookupRequestId = requestId;
+  state.lookupTrackId = track.id;
+  state.isFetchingLookup = true;
+  state.lookupButton = playButton;
+
+  const rawQuery = `${track.artist || ''} ${track.track || ''}`;
+  const searchQuery = rawQuery.trim();
+  const requestUrl = new URL('https://eu.qqdl.site/api/get-music');
+  requestUrl.searchParams.set('q', searchQuery || rawQuery);
+  requestUrl.searchParams.set('offset', '0');
 
   const controller = new AbortController();
-  state.playbackAbortController = controller;
-  state.playingTrackId = track.id;
-  state.isFetchingStream = true;
-  state.audioElement = null;
+  state.lookupAbortController = controller;
 
-  renderCards();
-
-  const label = formatTrackLabel(track.artist, track.track);
-  setStatus(`Fetching stream for ${label}...`);
+  applyLookupButtonState(playButton, 'loading');
 
   try {
-    const streamUrl = await resolveStreamUrl(track.url, controller);
-    if (controller.signal.aborted) {
+    const response = await fetch(requestUrl.toString(), { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (payload?.success === false) {
+      const reason = payload?.error?.message || 'Lookup failed.';
+      throw new Error(reason);
+    }
+
+    const items =
+      payload?.data?.tracks?.items ||
+      payload?.tracks?.items ||
+      payload?.data?.items ||
+      payload?.items ||
+      [];
+    const item = Array.isArray(items) ? items[0] : null;
+    if (!item) {
+      throw new Error('No results found.');
+    }
+
+    if (state.lookupRequestId !== requestId) {
       return;
     }
 
-    if (!streamUrl) {
-      throw new Error('Stream URL was empty.');
-    }
+    const performerName = item?.performer?.name ?? 'Unknown performer';
+    const trackTitle = item?.title ?? 'Unknown title';
 
-    const audio = new Audio();
-    audio.preload = 'none';
-    audio.src = streamUrl;
-    audio.crossOrigin = 'anonymous';
-
-    audio.addEventListener('ended', () => {
-      if (state.audioElement === audio) {
-        stopCurrentPlayback({ silent: true });
-        renderCards();
-        setStatus(`${label} finished playing.`);
-      }
+    showTrackTooltip({
+      playButton,
+      trackId: track.id,
+      performerName,
+      trackTitle,
+      isError: false,
     });
-
-    audio.addEventListener('error', (event) => {
-      console.error('Audio playback error', event);
-      if (state.audioElement === audio) {
-        stopCurrentPlayback({ silent: true });
-        renderCards();
-        setStatus(`Playback error for ${label}.`);
-      }
-    });
-
-    state.audioElement = audio;
-    state.isFetchingStream = false;
-    state.playbackAbortController = null;
-
-    await audio.play();
-    setStatus(`Playing ${label}.`);
+    applyLookupButtonState(playButton, 'active');
   } catch (error) {
-    if (!controller.signal.aborted) {
-      console.error('Failed to start playback', error);
-      setStatus(`Unable to play ${formatTrackLabel(track.artist, track.track)}.`);
-      stopCurrentPlayback({ silent: true });
+    if (error.name === 'AbortError') {
+      if (state.lookupButton !== playButton) {
+        applyLookupButtonState(playButton, 'idle');
+      }
+      return;
     }
+
+    console.error('Unable to fetch track information.', error);
+
+    if (state.lookupRequestId !== requestId) {
+      return;
+    }
+
+    showTrackTooltip({
+      playButton,
+      trackId: track.id,
+      performerName: 'Lookup failed',
+      trackTitle: error && error.message ? error.message : 'Unexpected error.',
+      isError: true,
+    });
+    applyLookupButtonState(playButton, 'active');
   } finally {
-    state.isFetchingStream = false;
-    state.playbackAbortController = null;
-    renderCards();
+    if (state.lookupRequestId === requestId) {
+      state.lookupTrackId = null;
+      state.isFetchingLookup = false;
+      state.lookupAbortController = null;
+      state.lookupButton = null;
+      state.lookupRequestId = null;
+    }
   }
 }
 
-async function resolveStreamUrl(resourceUrl, controller) {
-  const response = await fetch(resourceUrl, { signal: controller.signal });
-  if (!response.ok) {
-    throw new Error(`Resolver responded with ${response.status}`);
-  }
+function showTrackTooltip({ playButton, trackId, performerName, trackTitle, isError }) {
+  closeActiveTooltip({ shouldResetButton: false });
 
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const data = await response.json();
-    if (typeof data === 'string') {
-      return data.trim();
-    }
-    if (data && typeof data.url === 'string') {
-      return data.url.trim();
-    }
-    throw new Error('Resolver JSON did not include a url property.');
+  const tooltip = document.createElement('div');
+  tooltip.className = 'track-tooltip';
+  if (isError) {
+    tooltip.classList.add('is-error');
   }
+  tooltip.setAttribute('role', 'dialog');
+  tooltip.setAttribute('aria-live', isError ? 'assertive' : 'polite');
 
-  const text = await response.text();
-  return text.trim();
+  const content = document.createElement('div');
+  content.className = 'track-tooltip-content';
+
+  const displayLabel = [performerName, trackTitle].filter(Boolean).join(' - ') || 'Details unavailable';
+  const label = document.createElement('span');
+  label.className = 'track-tooltip-label';
+  label.textContent = displayLabel;
+
+  const tooltipPlayButton = document.createElement('button');
+  tooltipPlayButton.type = 'button';
+  tooltipPlayButton.className = 'track-action-button track-tooltip-play';
+  tooltipPlayButton.innerHTML = '<i class="fa-solid fa-play"></i>';
+  tooltipPlayButton.setAttribute('aria-label', 'Play track');
+  tooltipPlayButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  content.append(label, tooltipPlayButton);
+
+  tooltip.style.position = 'absolute';
+  tooltip.style.visibility = 'hidden';
+
+  tooltip.append(content);
+  document.body.appendChild(tooltip);
+
+  const reposition = () => positionTooltip(tooltip, playButton);
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+  const handleEscape = (event) => {
+    if (event.key === 'Escape') {
+      closeActiveTooltip();
+    }
+  };
+  const handleDocumentPointer = (event) => {
+    if (tooltip.contains(event.target)) {
+      return;
+    }
+    if (playButton.contains(event.target)) {
+      return;
+    }
+    closeActiveTooltip();
+  };
+  document.addEventListener('keydown', handleEscape);
+  document.addEventListener('pointerdown', handleDocumentPointer);
+
+  reposition();
+  tooltip.style.visibility = 'visible';
+
+  state.activeTooltip = {
+    element: tooltip,
+    triggerButton: playButton,
+    trackId,
+    cleanup: () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('pointerdown', handleDocumentPointer);
+    },
+  };
 }
 
-function stopCurrentPlayback({ silent = false } = {}) {
-  const controller = state.playbackAbortController;
-  const hadController = Boolean(controller);
-  if (controller) {
+
+function positionTooltip(tooltip, playButton) {
+  if (!tooltip || !playButton) {
+    return;
+  }
+
+  const buttonRect = playButton.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+  const scrollLeft = window.scrollX || document.documentElement.scrollLeft || 0;
+
+  let top = buttonRect.top + scrollTop - tooltipRect.height - 12;
+  if (top < scrollTop + 8) {
+    top = buttonRect.bottom + scrollTop + 12;
+  }
+
+  let left = buttonRect.left + scrollLeft + buttonRect.width / 2 - tooltipRect.width / 2;
+  const minLeft = scrollLeft + 12;
+  const maxLeft = scrollLeft + window.innerWidth - tooltipRect.width - 12;
+  left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
+
+  tooltip.style.top = `${Math.round(top)}px`;
+  tooltip.style.left = `${Math.round(left)}px`;
+}
+
+function closeActiveTooltip({ shouldResetButton = true } = {}) {
+  const active = state.activeTooltip;
+  if (!active) {
+    return;
+  }
+
+  if (typeof active.cleanup === 'function') {
     try {
-      controller.abort();
+      active.cleanup();
     } catch (error) {
-      console.warn('Unable to abort playback request.', error);
+      console.warn('Unable to clean up tooltip listeners.', error);
     }
   }
-  state.playbackAbortController = null;
 
-  let wasPlaying = false;
-  if (state.audioElement) {
-    try {
-      wasPlaying = !state.audioElement.paused && !state.audioElement.ended;
-      state.audioElement.pause();
-    } catch (error) {
-      console.warn('Unable to pause audio element.', error);
-    }
-    state.audioElement.src = '';
-    if (typeof state.audioElement.load === 'function') {
-      state.audioElement.load();
-    }
-    state.audioElement = null;
+  if (active.element && active.element.parentNode) {
+    active.element.parentNode.removeChild(active.element);
   }
 
-  const hadTrack = Boolean(state.playingTrackId);
-  state.playingTrackId = null;
-  state.isFetchingStream = false;
-
-  if (!silent) {
-    renderCards();
+  if (shouldResetButton && active.triggerButton && active.triggerButton.isConnected) {
+    applyLookupButtonState(active.triggerButton, 'idle');
   }
 
-  return wasPlaying || hadTrack || hadController;
+  state.activeTooltip = null;
 }
 
 async function handleAddButtonClick({ track, addButton }) {
