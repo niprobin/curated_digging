@@ -844,7 +844,7 @@ async function postTrackToWebhook(payload) {
 
 async function postTrackCheckedStatus({ track, checked }) {
   const payload = {
-    'spotify-id': track?.spotifyId || '',
+    'spotify_id': track?.spotifyId || '',
     artist: track?.artist || 'Unknown Artist',
     title: track?.track || 'Untitled Track',
     checked: Boolean(checked),
