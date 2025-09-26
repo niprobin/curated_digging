@@ -31,6 +31,12 @@ const state = {
   lookupAbortController: null,
   lookupButton: null,
   activeTooltip: null,
+  previewAudio: null,
+  previewTrackSourceId: null,
+  previewAbortController: null,
+  previewButton: null,
+  previewLabel: null,
+  isFetchingPreview: false,
 };
 
 const elements = {
@@ -634,12 +640,15 @@ async function handlePlayButtonClick({ track, playButton }) {
 
     const performerName = item?.performer?.name ?? 'Unknown performer';
     const trackTitle = item?.title ?? 'Unknown title';
+    const remoteTrackId = item?.id != null ? String(item.id) : null;
 
     showTrackTooltip({
       playButton,
       trackId: track.id,
       performerName,
       trackTitle,
+      remoteTrackId,
+      track,
       isError: false,
     });
     applyLookupButtonState(playButton, 'active');
@@ -662,6 +671,8 @@ async function handlePlayButtonClick({ track, playButton }) {
       trackId: track.id,
       performerName: 'Lookup failed',
       trackTitle: error && error.message ? error.message : 'Unexpected error.',
+      remoteTrackId: null,
+      track,
       isError: true,
     });
     applyLookupButtonState(playButton, 'active');
@@ -676,7 +687,7 @@ async function handlePlayButtonClick({ track, playButton }) {
   }
 }
 
-function showTrackTooltip({ playButton, trackId, performerName, trackTitle, isError }) {
+function showTrackTooltip({ playButton, trackId, performerName, trackTitle, remoteTrackId, track, isError }) {
   closeActiveTooltip({ shouldResetButton: false });
 
   const tooltip = document.createElement('div');
@@ -698,12 +709,20 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, isEr
   const tooltipPlayButton = document.createElement('button');
   tooltipPlayButton.type = 'button';
   tooltipPlayButton.className = 'track-action-button track-tooltip-play';
-  tooltipPlayButton.innerHTML = '<i class="fa-solid fa-play"></i>';
-  tooltipPlayButton.setAttribute('aria-label', 'Play track');
+  tooltipPlayButton.dataset.remoteTrackId = remoteTrackId ? String(remoteTrackId) : '';
+  tooltipPlayButton.setAttribute('aria-label', 'Play preview');
   tooltipPlayButton.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    handleTooltipPlayButtonClick({ tooltipButton: tooltipPlayButton, remoteTrackId, track });
   });
+
+  if (!remoteTrackId || isError) {
+    tooltipPlayButton.disabled = true;
+    tooltipPlayButton.setAttribute('aria-disabled', 'true');
+  }
+
+  applyTooltipPlayButtonState(tooltipPlayButton, 'idle');
 
   content.append(label, tooltipPlayButton);
 
@@ -740,6 +759,8 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, isEr
     element: tooltip,
     triggerButton: playButton,
     trackId,
+    remoteTrackId: remoteTrackId || null,
+    track: track || null,
     cleanup: () => {
       window.removeEventListener('scroll', reposition, true);
       window.removeEventListener('resize', reposition);
@@ -749,6 +770,202 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, isEr
   };
 }
 
+
+function applyTooltipPlayButtonState(button, stateValue) {
+  if (!button) return;
+  const isDisabled = button.getAttribute('aria-disabled') === 'true';
+  button.classList.remove('is-loading', 'is-playing');
+
+  if (stateValue === 'loading') {
+    button.classList.add('is-loading');
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    button.setAttribute('aria-label', 'Loading preview');
+    return;
+  }
+
+  if (stateValue === 'playing') {
+    button.classList.add('is-playing');
+    button.disabled = false;
+    button.innerHTML = '<i class="fa-solid fa-pause"></i>';
+    button.setAttribute('aria-label', 'Pause preview');
+    return;
+  }
+
+  if (isDisabled) {
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-play"></i>';
+    button.setAttribute('aria-label', 'Preview unavailable');
+    return;
+  }
+
+  button.disabled = false;
+  button.innerHTML = '<i class="fa-solid fa-play"></i>';
+  button.setAttribute('aria-label', 'Play preview');
+}
+
+function handleTooltipPlayButtonClick({ tooltipButton, remoteTrackId, track }) {
+  if (!tooltipButton) {
+    return;
+  }
+
+  if (tooltipButton.disabled || !remoteTrackId) {
+    const label = formatTrackLabel(track?.artist, track?.track);
+    setStatus(`Preview unavailable for ${label}.`);
+    return;
+  }
+
+  if (state.isFetchingPreview && state.previewButton === tooltipButton) {
+    return;
+  }
+
+  const isCurrentlyPlaying =
+    state.previewAudio &&
+    state.previewButton === tooltipButton &&
+    !state.previewAudio.paused;
+
+  if (isCurrentlyPlaying) {
+    const label = formatTrackLabel(track?.artist, track?.track);
+    setStatus(`Preview paused for ${label}.`);
+    stopTooltipPlayback({ silent: true });
+    return;
+  }
+
+  startTooltipPreview({ button: tooltipButton, remoteTrackId, track });
+}
+
+async function startTooltipPreview({ button, remoteTrackId, track }) {
+  if (!button || !remoteTrackId) {
+    return;
+  }
+
+  const label = formatTrackLabel(track?.artist, track?.track);
+  stopTooltipPlayback({ silent: true });
+
+  state.previewButton = button;
+  state.previewTrackSourceId = remoteTrackId;
+  state.previewLabel = label;
+
+  const controller = new AbortController();
+  state.previewAbortController = controller;
+  state.isFetchingPreview = true;
+  state.previewAudio = null;
+
+  applyTooltipPlayButtonState(button, 'loading');
+  setStatus(`Fetching preview for ${label}...`);
+
+  const requestUrl = new URL('https://eu.qqdl.site/api/download-music');
+  requestUrl.searchParams.set('track_id', remoteTrackId);
+  requestUrl.searchParams.set('quality', '27');
+
+  let audio = null;
+  let succeeded = false;
+
+  try {
+    const response = await fetch(requestUrl.toString(), { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const streamUrl = payload?.data?.url || payload?.url;
+    if (!streamUrl) {
+      throw new Error('Playable URL missing.');
+    }
+
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    audio = new Audio(streamUrl);
+    audio.crossOrigin = 'anonymous';
+
+    audio.addEventListener('ended', () => {
+      if (state.previewAudio === audio) {
+        setStatus(`Preview finished for ${label}.`);
+        stopTooltipPlayback({ silent: true });
+      }
+    });
+
+    audio.addEventListener('error', (event) => {
+      if (state.previewAudio === audio) {
+        console.error('Tooltip audio error', event);
+        setStatus(`Playback error for ${label}.`);
+        stopTooltipPlayback({ silent: true });
+      }
+    });
+
+    state.previewAudio = audio;
+    state.previewAbortController = null;
+    state.isFetchingPreview = false;
+
+    await audio.play();
+    applyTooltipPlayButtonState(button, 'playing');
+    setStatus(`Playing preview for ${label}.`);
+    succeeded = true;
+  } catch (error) {
+    if (error.name === 'AbortError' || controller.signal.aborted) {
+      return;
+    }
+    console.error('Unable to start tooltip preview', error);
+    setStatus(`Unable to play preview for ${label}.`);
+  } finally {
+    if (state.previewAbortController === controller) {
+      state.previewAbortController = null;
+    }
+    if (!succeeded) {
+      state.previewAudio = null;
+      state.previewTrackSourceId = null;
+      state.previewLabel = null;
+      if (state.previewButton === button) {
+        state.previewButton = null;
+      }
+      state.isFetchingPreview = false;
+      if (button.isConnected) {
+        applyTooltipPlayButtonState(button, 'idle');
+      }
+    }
+  }
+}
+
+function stopTooltipPlayback({ silent = false } = {}) {
+  const controller = state.previewAbortController;
+  if (controller) {
+    try {
+      controller.abort();
+    } catch (error) {
+      console.warn('Unable to abort preview request.', error);
+    }
+  }
+  state.previewAbortController = null;
+
+  const audio = state.previewAudio;
+  const button = state.previewButton;
+  const label = state.previewLabel;
+
+  state.previewAudio = null;
+  state.previewTrackSourceId = null;
+  state.previewButton = null;
+  state.previewLabel = null;
+  state.isFetchingPreview = false;
+
+  if (audio) {
+    try {
+      audio.pause();
+    } catch (error) {
+      console.warn('Unable to pause preview audio.', error);
+    }
+    audio.src = '';
+  }
+
+  if (button && button.isConnected) {
+    applyTooltipPlayButtonState(button, 'idle');
+  }
+
+  if (!silent && label) {
+    setStatus(`Preview paused for ${label}.`);
+  }
+}
 
 function positionTooltip(tooltip, playButton) {
   if (!tooltip || !playButton) {
@@ -779,6 +996,8 @@ function closeActiveTooltip({ shouldResetButton = true } = {}) {
   if (!active) {
     return;
   }
+
+  stopTooltipPlayback({ silent: true });
 
   if (typeof active.cleanup === 'function') {
     try {
@@ -844,7 +1063,7 @@ async function postTrackToWebhook(payload) {
 
 async function postTrackCheckedStatus({ track, checked }) {
   const payload = {
-    'spotify_id': track?.spotifyId || '',
+    'spotify-id': track?.spotifyId || '',
     artist: track?.artist || 'Unknown Artist',
     title: track?.track || 'Untitled Track',
     checked: Boolean(checked),
@@ -1131,7 +1350,7 @@ function setStatus(message) {
 function toggleLoading(isLoading) {
   if (!elements.refreshButton) return;
   elements.refreshButton.disabled = isLoading;
-  elements.refreshButton.textContent = isLoading ? 'IN PROGRESS' : 'REFRESH';
+  elements.refreshButton.textContent = isLoading ? 'Refreshing...' : 'Refresh';
   if (isLoading) {
     elements.refreshButton.setAttribute('aria-busy', 'true');
   } else {
