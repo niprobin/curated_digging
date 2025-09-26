@@ -834,6 +834,17 @@ function openPlaylistDrawer({ track, trigger }) {
 
   document.removeEventListener('keydown', handlePlaylistDrawerKeydown);
   document.addEventListener('keydown', handlePlaylistDrawerKeydown);
+
+  if (state.playlistDrawerList) {
+    const firstItem = state.playlistDrawerList.querySelector('.playlist-drawer__item');
+    if (firstItem) {
+      try {
+        firstItem.focus({ preventScroll: true });
+      } catch (error) {
+        console.warn('Unable to focus playlist option', error);
+      }
+    }
+  }
 }
 
 function handlePlaylistDrawerKeydown(event) {
@@ -866,6 +877,15 @@ function closePlaylistDrawer({ focusTrigger = false } = {}) {
   }
   if (state.playlistDrawerOverlay) {
     state.playlistDrawerOverlay.setAttribute('hidden', '');
+  }
+
+  const firstItem = state.playlistDrawerList?.querySelector('.playlist-drawer__item');
+  if (firstItem) {
+    try {
+      firstItem.blur();
+    } catch (error) {
+      console.warn('Unable to blur playlist option', error);
+    }
   }
 
   if (state.playlistDrawerTrigger && state.playlistDrawerTrigger.isConnected) {
@@ -1602,7 +1622,7 @@ function setStatus(message) {
 function toggleLoading(isLoading) {
   if (!elements.refreshButton) return;
   elements.refreshButton.disabled = isLoading;
-  elements.refreshButton.textContent = isLoading ? 'Refreshing...' : 'Refresh';
+  elements.refreshButton.innerHTML = isLoading ? '<i class="fa-solid fa-arrows-rotate"></i>' : '<i class="fa-solid fa-arrows-rotate"></i>';
   if (isLoading) {
     elements.refreshButton.setAttribute('aria-busy', 'true');
   } else {

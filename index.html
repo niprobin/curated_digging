@@ -14,23 +14,24 @@
     <div class="app-shell">
       <section class="filters-bar" aria-label="Track controls">
         <div class="filters-panel">
-          <button id="refreshButton" class="refresh-button" type="button" aria-live="polite"><i class="fa-solid fa-arrows-rotate"></i></button>
           <div id="filterButtons" class="filter-buttons" role="group" aria-label="Date filters"></div>
         </div>
+        
       </section>
-
       <main class="layout container">
         <aside class="curator-panel" aria-label="Curator selector">
           <div class="curator-panel__heading">
             <h2>Curators</h2>
+            <button id="refreshButton" class="refresh-button" type="button" aria-live="polite"><i class="fa-solid fa-arrows-rotate"></i></button>
           </div>
           <div id="tabList" class="tab-list" role="tablist" aria-orientation="vertical"></div>
+          
         </aside>
 
         <div class="content-column">
+          <p id="statusMessage" class="status-message" role="status"></p>
           <section id="cardsContainer" class="cards-grid" aria-live="polite"></section>
           <div id="paginationControls" class="pagination" aria-label="Pagination"></div>
-          <p id="statusMessage" class="status-message" role="status"></p>
         </div>
       </main>
     </div>
