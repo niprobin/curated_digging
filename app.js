@@ -53,7 +53,15 @@ const state = {
   lookupRequestId: null,
   lookupAbortController: null,
   lookupButton: null,
-  activePlaylistMenu: null,
+  playlistDrawer: null,
+  playlistDrawerOverlay: null,
+  playlistDrawerTitle: null,
+  playlistDrawerList: null,
+  playlistDrawerCloseButton: null,
+  playlistDrawerTrigger: null,
+  playlistDrawerTrack: null,
+  playlistDrawerTrackId: null,
+  isPlaylistDrawerOpen: false,
   miniPlayer: null,
   miniPlayerControl: null,
   miniPlayerProgress: null,
@@ -422,16 +430,13 @@ function renderCards() {
     state.lookupButton = null;
   }
 
-  if (state.activePlaylistMenu) {
-    const anchorButton = state.activePlaylistMenu.anchor;
-    if (!anchorButton || !anchorButton.isConnected) {
-      closeActivePlaylistMenu();
-    } else {
-      const menuTrackId = state.activePlaylistMenu.trackId;
-      const stillVisible = menuTrackId == null ? false : curatorTracks.some((item) => String(item.id) === menuTrackId);
-      if (!stillVisible) {
-        closeActivePlaylistMenu();
-      }
+  if (state.isPlaylistDrawerOpen) {
+    const trigger = state.playlistDrawerTrigger;
+    const drawerTrackId = state.playlistDrawerTrackId;
+    const triggerConnected = Boolean(trigger && trigger.isConnected);
+    const stillVisible = drawerTrackId != null && curatorTracks.some((item) => String(item.id) === drawerTrackId);
+    if (!triggerConnected || !stillVisible) {
+      closePlaylistDrawer({ focusTrigger: false });
     }
   }
 
@@ -528,13 +533,9 @@ function createTrackCard(track) {
   addButton.type = 'button';
   addButton.className = 'track-action-button track-action-button--add';
   addButton.setAttribute('aria-label', 'Add track to playlist');
-  addButton.setAttribute('aria-haspopup', 'listbox');
+  addButton.setAttribute('aria-haspopup', 'dialog');
   addButton.setAttribute('aria-expanded', 'false');
   addButton.innerHTML = '<i class=\"fa-solid fa-plus\"></i>';
-
-  const addWrapper = document.createElement('div');
-  addWrapper.className = 'track-add-wrapper';
-  addWrapper.appendChild(addButton);
 
   const statusButton = document.createElement('button');
   statusButton.type = 'button';
@@ -581,10 +582,10 @@ function createTrackCard(track) {
 
   addButton.addEventListener('click', (event) => {
     event.preventDefault();
-    togglePlaylistMenu({ track, anchorButton: addButton, wrapper: addWrapper });
+    openPlaylistDrawer({ track, trigger: addButton });
   });
 
-  actions.append(playButton, addWrapper, statusButton);
+  actions.append(playButton, addButton, statusButton);
 
   article.append(info, actions);
 
@@ -740,103 +741,147 @@ function clearActiveTrackButton() {
   state.activeTrackId = null;
 }
 
-function togglePlaylistMenu({ track, anchorButton, wrapper }) {
-  if (!anchorButton || !wrapper) {
-    return;
-  }
-  if (state.activePlaylistMenu && state.activePlaylistMenu.anchor === anchorButton) {
-    closeActivePlaylistMenu();
-    return;
-  }
-  openPlaylistMenu({ track, anchorButton, wrapper });
-}
-
-function openPlaylistMenu({ track, anchorButton, wrapper }) {
-  if (!anchorButton || !wrapper) {
+function ensurePlaylistDrawer() {
+  if (state.playlistDrawer) {
     return;
   }
 
-  closeActivePlaylistMenu();
+  const overlay = document.createElement('div');
+  overlay.className = 'playlist-drawer-overlay';
+  overlay.setAttribute('hidden', '');
 
-  const menu = document.createElement('div');
-  menu.className = 'playlist-menu';
-  menu.setAttribute('role', 'listbox');
+  const drawer = document.createElement('aside');
+  drawer.className = 'playlist-drawer';
+  drawer.setAttribute('aria-hidden', 'true');
+  drawer.innerHTML = `
+    <div class="playlist-drawer__header">
+      <h2 class="playlist-drawer__title">Select playlist</h2>
+      <button type="button" class="playlist-drawer__close" aria-label="Close playlist drawer">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="playlist-drawer__body">
+      <p class="playlist-drawer__track-label">Choose a playlist for this track.</p>
+      <div class="playlist-drawer__list" role="listbox"></div>
+    </div>
+  `;
 
-  PLAYLIST_OPTIONS.forEach((option) => {
-    const optionButton = document.createElement('button');
-    optionButton.type = 'button';
-    optionButton.className = 'playlist-menu__item';
-    optionButton.textContent = option;
-    optionButton.dataset.playlistName = option;
-    optionButton.addEventListener('click', () => {
-      handlePlaylistOptionSelect({ track, addButton: anchorButton, playlist: option });
+  document.body.append(overlay, drawer);
+
+  state.playlistDrawer = drawer;
+  state.playlistDrawerOverlay = overlay;
+  state.playlistDrawerTitle = drawer.querySelector('.playlist-drawer__track-label');
+  state.playlistDrawerList = drawer.querySelector('.playlist-drawer__list');
+  state.playlistDrawerCloseButton = drawer.querySelector('.playlist-drawer__close');
+
+  if (state.playlistDrawerCloseButton) {
+    state.playlistDrawerCloseButton.addEventListener('click', () => {
+      closePlaylistDrawer({ focusTrigger: true });
     });
-    menu.appendChild(optionButton);
-  });
+  }
+  if (state.playlistDrawerOverlay) {
+    state.playlistDrawerOverlay.addEventListener('click', () => {
+      closePlaylistDrawer({ focusTrigger: true });
+    });
+  }
 
-  wrapper.appendChild(menu);
-  wrapper.classList.add('is-open');
-  anchorButton.setAttribute('aria-expanded', 'true');
-
-  const handleOutsidePointer = (event) => {
-    if (menu.contains(event.target) || anchorButton.contains(event.target)) {
-      return;
-    }
-    closeActivePlaylistMenu();
-  };
-
-  const handleEscape = (event) => {
-    if (event.key === 'Escape') {
-      closeActivePlaylistMenu();
-      anchorButton.focus();
-    }
-  };
-
-  document.addEventListener('pointerdown', handleOutsidePointer);
-  document.addEventListener('keydown', handleEscape);
-
-  state.activePlaylistMenu = {
-    menu,
-    anchor: anchorButton,
-    wrapper,
-    trackId: track?.id != null ? String(track.id) : null,
-    cleanup: () => {
-      document.removeEventListener('pointerdown', handleOutsidePointer);
-      document.removeEventListener('keydown', handleEscape);
-    },
-  };
+  const list = state.playlistDrawerList;
+  if (list) {
+    PLAYLIST_OPTIONS.forEach((option) => {
+      const optionButton = document.createElement('button');
+      optionButton.type = 'button';
+      optionButton.className = 'playlist-drawer__item';
+      optionButton.textContent = option;
+      optionButton.dataset.playlistName = option;
+      optionButton.addEventListener('click', () => {
+        handlePlaylistSelection(option);
+      });
+      list.appendChild(optionButton);
+    });
+  }
 }
 
-function handlePlaylistOptionSelect({ track, addButton, playlist }) {
-  closeActivePlaylistMenu();
-  handleAddButtonClick({ track, addButton, playlist });
-}
-
-function closeActivePlaylistMenu() {
-  const active = state.activePlaylistMenu;
-  if (!active) {
+function openPlaylistDrawer({ track, trigger }) {
+  if (!track || !trigger) {
     return;
   }
 
-  if (typeof active.cleanup === 'function') {
+  ensurePlaylistDrawer();
+
+  if (state.isPlaylistDrawerOpen) {
+    closePlaylistDrawer({ focusTrigger: false });
+  }
+
+  state.playlistDrawerTrack = track;
+  state.playlistDrawerTrackId = track?.id != null ? String(track.id) : null;
+  state.playlistDrawerTrigger = trigger;
+  state.isPlaylistDrawerOpen = true;
+
+  trigger.setAttribute('aria-expanded', 'true');
+
+  const label = formatTrackLabel(track.artist, track.track);
+  if (state.playlistDrawerTitle) {
+    state.playlistDrawerTitle.textContent = label;
+  }
+
+  if (state.playlistDrawerOverlay) {
+    state.playlistDrawerOverlay.removeAttribute('hidden');
+  }
+  if (state.playlistDrawer) {
+    state.playlistDrawer.classList.add('is-open');
+    state.playlistDrawer.setAttribute('aria-hidden', 'false');
+  }
+
+  document.removeEventListener('keydown', handlePlaylistDrawerKeydown);
+  document.addEventListener('keydown', handlePlaylistDrawerKeydown);
+}
+
+function handlePlaylistDrawerKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePlaylistDrawer({ focusTrigger: true });
+  }
+}
+
+function handlePlaylistSelection(playlist) {
+  if (!playlist || !state.playlistDrawerTrack) {
+    return;
+  }
+  const trigger = state.playlistDrawerTrigger;
+  handleAddButtonClick({ track: state.playlistDrawerTrack, addButton: trigger, playlist });
+}
+
+function closePlaylistDrawer({ focusTrigger = false } = {}) {
+  if (!state.isPlaylistDrawerOpen) {
+    return;
+  }
+
+  state.isPlaylistDrawerOpen = false;
+  state.playlistDrawerTrack = null;
+  state.playlistDrawerTrackId = null;
+
+  if (state.playlistDrawer) {
+    state.playlistDrawer.classList.remove('is-open');
+    state.playlistDrawer.setAttribute('aria-hidden', 'true');
+  }
+  if (state.playlistDrawerOverlay) {
+    state.playlistDrawerOverlay.setAttribute('hidden', '');
+  }
+
+  if (state.playlistDrawerTrigger && state.playlistDrawerTrigger.isConnected) {
+    state.playlistDrawerTrigger.setAttribute('aria-expanded', 'false');
+  }
+
+  if (focusTrigger && state.playlistDrawerTrigger && state.playlistDrawerTrigger.isConnected) {
     try {
-      active.cleanup();
+      state.playlistDrawerTrigger.focus();
     } catch (error) {
-      console.warn('Unable to clean up playlist menu listeners.', error);
+      console.warn('Unable to focus playlist trigger', error);
     }
   }
 
-  if (active.menu && active.menu.parentNode) {
-    active.menu.parentNode.removeChild(active.menu);
-  }
-  if (active.wrapper && active.wrapper.classList) {
-    active.wrapper.classList.remove('is-open');
-  }
-  if (active.anchor && active.anchor.isConnected) {
-    active.anchor.setAttribute('aria-expanded', 'false');
-  }
-
-  state.activePlaylistMenu = null;
+  state.playlistDrawerTrigger = null;
+  document.removeEventListener('keydown', handlePlaylistDrawerKeydown);
 }
 
 async function handleAddButtonClick({ track, addButton, playlist }) {
@@ -847,6 +892,8 @@ async function handleAddButtonClick({ track, addButton, playlist }) {
     setStatus('Select a playlist before adding this track.');
     return;
   }
+
+  closePlaylistDrawer({ focusTrigger: false });
 
   const label = formatTrackLabel(track.artist, track.track);
   const trackId = track.id;
@@ -874,6 +921,11 @@ async function handleAddButtonClick({ track, addButton, playlist }) {
     addButton.classList.remove('is-busy');
     addButton.removeAttribute('aria-busy');
     addButton.setAttribute('aria-expanded', 'false');
+    try {
+      addButton.focus();
+    } catch (error) {
+      console.warn('Unable to focus add button after submission.', error);
+    }
   }
 }
 
