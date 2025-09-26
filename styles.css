@@ -342,6 +342,52 @@ body {
   box-shadow: 0 0 0 2px rgba(125, 195, 255, 0.35);
 }
 
+.track-add-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.track-add-wrapper.is-open > .track-action-button--add {
+  background: rgba(59, 130, 246, 0.55);
+  border-color: rgba(125, 195, 255, 0.95);
+  color: var(--color-text);
+}
+
+.playlist-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 8px;
+  background: rgba(12, 18, 28, 0.95);
+  border: 1px solid rgba(125, 195, 255, 0.35);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+
+.playlist-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  text-align: left;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.playlist-menu__item:hover,
+.playlist-menu__item:focus {
+  background: rgba(59, 130, 246, 0.35);
+  outline: none;
+}
+
 
 
 

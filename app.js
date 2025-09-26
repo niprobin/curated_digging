@@ -15,6 +15,29 @@ const FILTERS = [
   { id: 'last30', label: 'Last 30 days', days: 30 },
 ];
 
+const PLAYLIST_OPTIONS = [
+  'Afrobeat & Highlife',
+  'Beats',
+  'Bossa Nova',
+  'Brazilian Music',
+  'Disco',
+  'DNB Intelligent',
+  'Downtempo Trip-hop',
+  'Funk & Rock',
+  'Hip-hop',
+  'House Chill',
+  'House Dancefloor',
+  'Jazz Classic',
+  'Jazz Funk',
+  'Latin Music',
+  'Morning Chill',
+  'Neo Soul',
+  'Reggae',
+  'RnB',
+  'Soul Music',
+];
+
+
 const state = {
   tracks: [],
   curators: [],
@@ -30,6 +53,7 @@ const state = {
   lookupRequestId: null,
   lookupAbortController: null,
   lookupButton: null,
+  activePlaylistMenu: null,
   miniPlayer: null,
   miniPlayerControl: null,
   miniPlayerProgress: null,
@@ -398,6 +422,19 @@ function renderCards() {
     state.lookupButton = null;
   }
 
+  if (state.activePlaylistMenu) {
+    const anchorButton = state.activePlaylistMenu.anchor;
+    if (!anchorButton || !anchorButton.isConnected) {
+      closeActivePlaylistMenu();
+    } else {
+      const menuTrackId = state.activePlaylistMenu.trackId;
+      const stillVisible = menuTrackId == null ? false : curatorTracks.some((item) => String(item.id) === menuTrackId);
+      if (!stillVisible) {
+        closeActivePlaylistMenu();
+      }
+    }
+  }
+
   const hiddenCount = curatorTracks.filter((track) => isTrackChecked(track.id)).length;
   const filtered = state.showChecked
     ? curatorTracks
@@ -489,9 +526,15 @@ function createTrackCard(track) {
 
   const addButton = document.createElement('button');
   addButton.type = 'button';
-  addButton.className = 'track-action-button';
-  addButton.setAttribute('aria-label', 'Add track');
+  addButton.className = 'track-action-button track-action-button--add';
+  addButton.setAttribute('aria-label', 'Add track to playlist');
+  addButton.setAttribute('aria-haspopup', 'listbox');
+  addButton.setAttribute('aria-expanded', 'false');
   addButton.innerHTML = '<i class=\"fa-solid fa-plus\"></i>';
+
+  const addWrapper = document.createElement('div');
+  addWrapper.className = 'track-add-wrapper';
+  addWrapper.appendChild(addButton);
 
   const statusButton = document.createElement('button');
   statusButton.type = 'button';
@@ -536,11 +579,12 @@ function createTrackCard(track) {
     }
   });
 
-  addButton.addEventListener('click', () => {
-    handleAddButtonClick({ track, addButton });
+  addButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    togglePlaylistMenu({ track, anchorButton: addButton, wrapper: addWrapper });
   });
 
-  actions.append(playButton, addButton, statusButton);
+  actions.append(playButton, addWrapper, statusButton);
 
   article.append(info, actions);
 
@@ -682,7 +726,7 @@ function getPlayButtonElement(trackId) {
   const value = String(trackId);
   const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
     ? CSS.escape(value)
-    : value.replace(/["\u0027\\]/g, "\$&");
+    : value.replace(/["\u0027\\]/g, '\\$&');
   return document.querySelector(`.play-button[data-track-id="${escaped}"]`);
 }
 function clearActiveTrackButton() {
@@ -696,34 +740,140 @@ function clearActiveTrackButton() {
   state.activeTrackId = null;
 }
 
-async function handleAddButtonClick({ track, addButton }) {
+function togglePlaylistMenu({ track, anchorButton, wrapper }) {
+  if (!anchorButton || !wrapper) {
+    return;
+  }
+  if (state.activePlaylistMenu && state.activePlaylistMenu.anchor === anchorButton) {
+    closeActivePlaylistMenu();
+    return;
+  }
+  openPlaylistMenu({ track, anchorButton, wrapper });
+}
+
+function openPlaylistMenu({ track, anchorButton, wrapper }) {
+  if (!anchorButton || !wrapper) {
+    return;
+  }
+
+  closeActivePlaylistMenu();
+
+  const menu = document.createElement('div');
+  menu.className = 'playlist-menu';
+  menu.setAttribute('role', 'listbox');
+
+  PLAYLIST_OPTIONS.forEach((option) => {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'playlist-menu__item';
+    optionButton.textContent = option;
+    optionButton.dataset.playlistName = option;
+    optionButton.addEventListener('click', () => {
+      handlePlaylistOptionSelect({ track, addButton: anchorButton, playlist: option });
+    });
+    menu.appendChild(optionButton);
+  });
+
+  wrapper.appendChild(menu);
+  wrapper.classList.add('is-open');
+  anchorButton.setAttribute('aria-expanded', 'true');
+
+  const handleOutsidePointer = (event) => {
+    if (menu.contains(event.target) || anchorButton.contains(event.target)) {
+      return;
+    }
+    closeActivePlaylistMenu();
+  };
+
+  const handleEscape = (event) => {
+    if (event.key === 'Escape') {
+      closeActivePlaylistMenu();
+      anchorButton.focus();
+    }
+  };
+
+  document.addEventListener('pointerdown', handleOutsidePointer);
+  document.addEventListener('keydown', handleEscape);
+
+  state.activePlaylistMenu = {
+    menu,
+    anchor: anchorButton,
+    wrapper,
+    trackId: track?.id != null ? String(track.id) : null,
+    cleanup: () => {
+      document.removeEventListener('pointerdown', handleOutsidePointer);
+      document.removeEventListener('keydown', handleEscape);
+    },
+  };
+}
+
+function handlePlaylistOptionSelect({ track, addButton, playlist }) {
+  closeActivePlaylistMenu();
+  handleAddButtonClick({ track, addButton, playlist });
+}
+
+function closeActivePlaylistMenu() {
+  const active = state.activePlaylistMenu;
+  if (!active) {
+    return;
+  }
+
+  if (typeof active.cleanup === 'function') {
+    try {
+      active.cleanup();
+    } catch (error) {
+      console.warn('Unable to clean up playlist menu listeners.', error);
+    }
+  }
+
+  if (active.menu && active.menu.parentNode) {
+    active.menu.parentNode.removeChild(active.menu);
+  }
+  if (active.wrapper && active.wrapper.classList) {
+    active.wrapper.classList.remove('is-open');
+  }
+  if (active.anchor && active.anchor.isConnected) {
+    active.anchor.setAttribute('aria-expanded', 'false');
+  }
+
+  state.activePlaylistMenu = null;
+}
+
+async function handleAddButtonClick({ track, addButton, playlist }) {
   if (!track || !addButton) return;
 
-  const payload = buildTrackPayload(track);
-  const label = formatTrackLabel(payload.artist, payload.title);
+  const selectedPlaylist = typeof playlist === 'string' ? playlist.trim() : '';
+  if (!selectedPlaylist) {
+    setStatus('Select a playlist before adding this track.');
+    return;
+  }
+
+  const label = formatTrackLabel(track.artist, track.track);
   const trackId = track.id;
+  const payload = buildTrackPayload(track, selectedPlaylist);
 
   try {
     addButton.disabled = true;
     addButton.classList.add('is-busy');
     addButton.setAttribute('aria-busy', 'true');
-    setStatus(`Adding ${label} to the radio queue...`);
+    setStatus(`Adding ${label} to ${selectedPlaylist}...`);
 
     await postTrackToWebhook(payload);
 
     const changed = setTrackChecked(trackId, true);
     setStatus(
-      `${label} sent to the radio queue ${changed ? 'and marked as checked.' : 'and was already checked.'}`
+      `${label} sent to ${selectedPlaylist} ${changed ? 'and marked as checked.' : 'and was already checked.'}`
     );
   } catch (error) {
     console.error(error);
-    setStatus(`Unable to add ${label}. Please try again.`);
+    setStatus(`Unable to add ${label} to ${selectedPlaylist}. Please try again.`);
   } finally {
     if (state.showChecked || !isTrackChecked(trackId)) {
       addButton.disabled = false;
     }
     addButton.classList.remove('is-busy');
     addButton.removeAttribute('aria-busy');
+    addButton.setAttribute('aria-expanded', 'false');
   }
 }
 
@@ -1123,11 +1273,12 @@ function formatTime(totalSeconds) {
 }
 
 
-function buildTrackPayload(track) {
+function buildTrackPayload(track, playlist) {
   return {
     artist: track?.artist || "Unknown Artist",
     title: track?.track || "Untitled Track",
     spotify_id: track?.spotifyId || "",
+    playlist: playlist || "",
   };
 }
 
