@@ -30,7 +30,6 @@ const state = {
   lookupRequestId: null,
   lookupAbortController: null,
   lookupButton: null,
-  activeTooltip: null,
   miniPlayer: null,
   miniPlayerControl: null,
   miniPlayerProgress: null,
@@ -41,10 +40,12 @@ const state = {
   miniPlayerAudio: null,
   miniPlayerTrackSourceId: null,
   miniPlayerTrack: null,
+  miniPlayerRemoteTrack: null,
   miniPlayerAbortController: null,
   miniPlayerRequestId: null,
   miniPlayerIsOpen: false,
   isMiniPlayerLoading: false,
+  activeTrackId: null,
 };
 
 const elements = {
@@ -382,11 +383,7 @@ function renderCards() {
     .filter((track) => track.curator === state.activeCurator)
     .filter(matchesActiveFilter);
 
-  if (state.activeTooltip && !curatorTracks.some((item) => item.id === state.activeTooltip.trackId)) {
-    closeActiveTooltip({ shouldResetButton: false });
-  }
-
-  if (state.lookupTrackId && !curatorTracks.some((item) => item.id === state.lookupTrackId)) {
+  if (state.lookupTrackId != null && !curatorTracks.some((item) => String(item.id) === String(state.lookupTrackId))) {
     if (state.lookupAbortController) {
       try {
         state.lookupAbortController.abort();
@@ -479,10 +476,12 @@ function createTrackCard(track) {
 
   const playButton = document.createElement('button');
   playButton.type = 'button';
-  playButton.className = 'track-action-button';
-  playButton.dataset.trackId = track.id;
+  playButton.className = 'track-action-button play-button';
+  playButton.dataset.trackId = track.id != null ? String(track.id) : '';
+  playButton.setAttribute('aria-label', 'Play track');
+  playButton.setAttribute('aria-pressed', 'false');
 
-  applyLookupButtonState(playButton, getLookupStateForTrack(track.id));
+  setPlayButtonState(playButton, getPlayButtonStateForTrack(track.id));
 
   playButton.addEventListener('click', () => {
     handlePlayButtonClick({ track, playButton });
@@ -548,52 +547,49 @@ function createTrackCard(track) {
   return article;
 }
 
-function getLookupStateForTrack(trackId) {
-  if (!trackId) {
+function getPlayButtonStateForTrack(trackId) {
+  if (trackId == null) {
     return 'idle';
   }
-  if (state.lookupTrackId === trackId && state.isFetchingLookup) {
+  const normalised = String(trackId);
+  if (state.lookupTrackId != null && String(state.lookupTrackId) === normalised && state.isFetchingLookup) {
     return 'loading';
   }
-  if (state.activeTooltip && state.activeTooltip.trackId === trackId) {
+  if (state.miniPlayerIsOpen && state.miniPlayerTrack && state.miniPlayerTrack.id != null && String(state.miniPlayerTrack.id) === normalised) {
+    return 'active';
+  }
+  if (state.activeTrackId != null && String(state.activeTrackId) === normalised) {
     return 'active';
   }
   return 'idle';
 }
-
-function applyLookupButtonState(button, stateValue) {
+function setPlayButtonState(button, stateValue) {
   if (!button) return;
   button.classList.remove('is-loading', 'is-active');
   button.disabled = false;
-  button.setAttribute('aria-pressed', 'false');
-
   if (stateValue === 'loading') {
     button.classList.add('is-loading');
     button.disabled = true;
     button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    button.setAttribute('aria-label', 'Fetching track info');
+    button.setAttribute('aria-label', 'Loading preview');
+    button.setAttribute('aria-pressed', 'false');
     return;
   }
-
   if (stateValue === 'active') {
     button.classList.add('is-active');
-    button.innerHTML = '<i class="fa-solid fa-arrow-up-from-bracket"></i>';
+    button.innerHTML = '<i class="fa-solid fa-play"></i>';
     button.setAttribute('aria-pressed', 'true');
-    button.setAttribute('aria-label', 'Hide track info');
+    button.setAttribute('aria-label', 'Playing preview');
     return;
   }
-
-  button.innerHTML = '<i class="fa-solid fa-arrow-up-from-bracket"></i>';
+  button.innerHTML = '<i class="fa-solid fa-play"></i>';
+  button.setAttribute('aria-pressed', 'false');
   button.setAttribute('aria-label', 'Play track');
 }
-
 async function handlePlayButtonClick({ track, playButton }) {
   if (!track || !playButton) {
     return;
   }
-
-  closeActiveTooltip();
-
   if (state.lookupAbortController) {
     try {
       state.lookupAbortController.abort();
@@ -601,36 +597,30 @@ async function handlePlayButtonClick({ track, playButton }) {
       console.warn('Unable to abort lookup request.', error);
     }
   }
-
   const requestId = Symbol('lookup-request');
   state.lookupRequestId = requestId;
-  state.lookupTrackId = track.id;
+  const currentTrackId = track.id != null ? String(track.id) : null;
+  state.lookupTrackId = currentTrackId;
   state.isFetchingLookup = true;
   state.lookupButton = playButton;
-
   const rawQuery = `${track.artist || ''} ${track.track || ''}`;
   const searchQuery = rawQuery.trim();
   const requestUrl = new URL('https://eu.qqdl.site/api/get-music');
   requestUrl.searchParams.set('q', searchQuery || rawQuery);
   requestUrl.searchParams.set('offset', '0');
-
   const controller = new AbortController();
   state.lookupAbortController = controller;
-
-  applyLookupButtonState(playButton, 'loading');
-
+  setPlayButtonState(playButton, 'loading');
   try {
     const response = await fetch(requestUrl.toString(), { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}`);
     }
-
     const payload = await response.json();
     if (payload?.success === false) {
       const reason = payload?.error?.message || 'Lookup failed.';
       throw new Error(reason);
     }
-
     const items =
       payload?.data?.tracks?.items ||
       payload?.tracks?.items ||
@@ -641,49 +631,39 @@ async function handlePlayButtonClick({ track, playButton }) {
     if (!item) {
       throw new Error('No results found.');
     }
-
     if (state.lookupRequestId !== requestId) {
       return;
     }
-
     const performerName = item?.performer?.name ?? 'Unknown performer';
     const trackTitle = item?.title ?? 'Unknown title';
     const remoteTrackId = item?.id != null ? String(item.id) : null;
-
-    showTrackTooltip({
-      playButton,
-      trackId: track.id,
-      performerName,
-      trackTitle,
+    if (!remoteTrackId) {
+      throw new Error('Preview unavailable for this track.');
+    }
+    clearActiveTrackButton();
+    openMiniPlayer({
       remoteTrackId,
       track,
-      isError: false,
+      performerName,
+      trackTitle,
     });
-    applyLookupButtonState(playButton, 'active');
+    setPlayButtonState(playButton, 'active');
+    state.activeTrackId = currentTrackId;
   } catch (error) {
     if (error.name === 'AbortError') {
       if (state.lookupButton !== playButton) {
-        applyLookupButtonState(playButton, 'idle');
+        setPlayButtonState(playButton, 'idle');
       }
       return;
     }
-
     console.error('Unable to fetch track information.', error);
-
     if (state.lookupRequestId !== requestId) {
       return;
     }
-
-    showTrackTooltip({
-      playButton,
-      trackId: track.id,
-      performerName: 'Lookup failed',
-      trackTitle: error && error.message ? error.message : 'Unexpected error.',
-      remoteTrackId: null,
-      track,
-      isError: true,
-    });
-    applyLookupButtonState(playButton, 'active');
+    const label = formatTrackLabel(track.artist, track.track);
+    const message = error && error.message ? error.message : 'Unexpected error.';
+    setStatus(`Lookup failed for ${label}: ${message}`);
+    setPlayButtonState(playButton, 'idle');
   } finally {
     if (state.lookupRequestId === requestId) {
       state.lookupTrackId = null;
@@ -695,103 +675,87 @@ async function handlePlayButtonClick({ track, playButton }) {
   }
 }
 
-function showTrackTooltip({ playButton, trackId, performerName, trackTitle, remoteTrackId, track, isError }) {
-  closeActiveTooltip({ shouldResetButton: false });
-
-  const tooltip = document.createElement('div');
-  tooltip.className = 'track-tooltip';
-  if (isError) {
-    tooltip.classList.add('is-error');
+function getPlayButtonElement(trackId) {
+  if (trackId == null) {
+    return null;
   }
-  tooltip.setAttribute('role', 'dialog');
-  tooltip.setAttribute('aria-live', isError ? 'assertive' : 'polite');
-
-  const content = document.createElement('div');
-  content.className = 'track-tooltip-content';
-
-  const displayLabel = [performerName, trackTitle].filter(Boolean).join(' - ') || 'Details unavailable';
-  const label = document.createElement('span');
-  label.className = 'track-tooltip-label';
-  label.textContent = displayLabel;
-
-  const tooltipPlayButton = document.createElement('button');
-  tooltipPlayButton.type = 'button';
-  tooltipPlayButton.className = 'track-action-button track-tooltip-play';
-  tooltipPlayButton.dataset.remoteTrackId = remoteTrackId ? String(remoteTrackId) : '';
-  tooltipPlayButton.setAttribute('aria-label', 'Play preview');
-  tooltipPlayButton.innerHTML = '<i class="fa-solid fa-play"></i>';
-  tooltipPlayButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    handleTooltipPlayButtonClick({ tooltipButton: tooltipPlayButton, remoteTrackId, track });
-  });
-
-  if (!remoteTrackId || isError) {
-    tooltipPlayButton.disabled = true;
-    tooltipPlayButton.setAttribute('aria-disabled', 'true');
+  const value = String(trackId);
+  const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\u0027\\]/g, "\$&");
+  return document.querySelector(`.play-button[data-track-id="${escaped}"]`);
+}
+function clearActiveTrackButton() {
+  if (state.activeTrackId == null) {
+    return;
   }
-
-
-
-  content.append(label, tooltipPlayButton);
-
-  tooltip.style.position = 'absolute';
-  tooltip.style.visibility = 'hidden';
-
-  tooltip.append(content);
-  document.body.appendChild(tooltip);
-
-  const reposition = () => positionTooltip(tooltip, playButton);
-  window.addEventListener('scroll', reposition, true);
-  window.addEventListener('resize', reposition);
-  const handleEscape = (event) => {
-    if (event.key === 'Escape') {
-      closeActiveTooltip();
-    }
-  };
-  const handleDocumentPointer = (event) => {
-    if (tooltip.contains(event.target)) {
-      return;
-    }
-    if (playButton.contains(event.target)) {
-      return;
-    }
-    closeActiveTooltip();
-  };
-  document.addEventListener('keydown', handleEscape);
-  document.addEventListener('pointerdown', handleDocumentPointer);
-
-  reposition();
-  tooltip.style.visibility = 'visible';
-
-  state.activeTooltip = {
-    element: tooltip,
-    triggerButton: playButton,
-    trackId,
-    remoteTrackId: remoteTrackId || null,
-    track: track || null,
-    cleanup: () => {
-      window.removeEventListener('scroll', reposition, true);
-      window.removeEventListener('resize', reposition);
-      document.removeEventListener('keydown', handleEscape);
-      document.removeEventListener('pointerdown', handleDocumentPointer);
-    },
-  };
+  const button = getPlayButtonElement(state.activeTrackId);
+  if (button) {
+    setPlayButtonState(button, 'idle');
+  }
+  state.activeTrackId = null;
 }
 
+async function handleAddButtonClick({ track, addButton }) {
+  if (!track || !addButton) return;
 
-function handleTooltipPlayButtonClick({ tooltipButton, remoteTrackId, track }) {
-  if (!tooltipButton) {
-    return;
+  const payload = buildTrackPayload(track);
+  const label = formatTrackLabel(payload.artist, payload.title);
+  const trackId = track.id;
+
+  try {
+    addButton.disabled = true;
+    addButton.classList.add('is-busy');
+    addButton.setAttribute('aria-busy', 'true');
+    setStatus(`Adding ${label} to the radio queue...`);
+
+    await postTrackToWebhook(payload);
+
+    const changed = setTrackChecked(trackId, true);
+    setStatus(
+      `${label} sent to the radio queue ${changed ? 'and marked as checked.' : 'and was already checked.'}`
+    );
+  } catch (error) {
+    console.error(error);
+    setStatus(`Unable to add ${label}. Please try again.`);
+  } finally {
+    if (state.showChecked || !isTrackChecked(trackId)) {
+      addButton.disabled = false;
+    }
+    addButton.classList.remove('is-busy');
+    addButton.removeAttribute('aria-busy');
   }
+}
 
-  if (tooltipButton.disabled || !remoteTrackId) {
-    const label = formatTrackLabel(track?.artist, track?.track);
-    setStatus(`Preview unavailable for ${label}.`);
-    return;
+async function postTrackToWebhook(payload) {
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Webhook responded with ${response.status}`);
   }
+}
 
-  openMiniPlayer({ remoteTrackId, track });
+async function postTrackCheckedStatus({ track, checked }) {
+  const payload = {
+    'spotify_id': track?.spotifyId || '',
+    artist: track?.artist || 'Unknown Artist',
+    title: track?.track || 'Untitled Track',
+    checked: Boolean(checked),
+  };
+
+  const response = await fetch(STATUS_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Status webhook responded with ${response.status}`);
+  }
 }
 
 function ensureMiniPlayer() {
@@ -853,7 +817,7 @@ function ensureMiniPlayer() {
   }
 }
 
-function openMiniPlayer({ remoteTrackId, track }) {
+function openMiniPlayer({ remoteTrackId, track, performerName, trackTitle }) {
   if (!remoteTrackId) {
     setStatus('Preview unavailable for this track.');
     return;
@@ -861,14 +825,19 @@ function openMiniPlayer({ remoteTrackId, track }) {
 
   ensureMiniPlayer();
 
-  const labelText = formatTrackLabel(track?.artist, track?.track);
+  const labelText = formatRemoteTrackLabel(performerName, trackTitle);
   if (state.miniPlayerLabel) {
     state.miniPlayerLabel.textContent = labelText;
   }
 
   state.miniPlayerTrackSourceId = String(remoteTrackId);
   state.miniPlayerTrack = track || null;
+  state.miniPlayerRemoteTrack = {
+    performer: performerName || 'Unknown performer',
+    title: trackTitle || 'Unknown title',
+  };
   state.miniPlayerIsOpen = true;
+  state.activeTrackId = track?.id != null ? String(track.id) : null;
 
   if (state.miniPlayer) {
     state.miniPlayer.classList.add('is-visible');
@@ -1134,7 +1103,11 @@ function resetMiniPlayerProgress() {
 
 function closeMiniPlayer() {
   stopMiniPlayerAudio({ silent: true });
+  clearActiveTrackButton();
   state.miniPlayerIsOpen = false;
+  state.miniPlayerTrackSourceId = null;
+  state.miniPlayerTrack = null;
+  state.miniPlayerRemoteTrack = null;
   if (state.miniPlayer) {
     state.miniPlayer.classList.remove('is-visible');
   }
@@ -1148,115 +1121,7 @@ function formatTime(totalSeconds) {
   const seconds = Math.floor(totalSeconds % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
-function positionTooltip(tooltip, playButton) {
-  if (!tooltip || !playButton) {
-    return;
-  }
 
-  const buttonRect = playButton.getBoundingClientRect();
-  const tooltipRect = tooltip.getBoundingClientRect();
-  const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
-  const scrollLeft = window.scrollX || document.documentElement.scrollLeft || 0;
-
-  let top = buttonRect.top + scrollTop - tooltipRect.height - 12;
-  if (top < scrollTop + 8) {
-    top = buttonRect.bottom + scrollTop + 12;
-  }
-
-  let left = buttonRect.left + scrollLeft + buttonRect.width / 2 - tooltipRect.width / 2;
-  const minLeft = scrollLeft + 12;
-  const maxLeft = scrollLeft + window.innerWidth - tooltipRect.width - 12;
-  left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
-
-  tooltip.style.top = `${Math.round(top)}px`;
-  tooltip.style.left = `${Math.round(left)}px`;
-}
-
-function closeActiveTooltip({ shouldResetButton = true } = {}) {
-  const active = state.activeTooltip;
-  if (!active) {
-    return;
-  }
-  if (typeof active.cleanup === 'function') {
-    try {
-      active.cleanup();
-    } catch (error) {
-      console.warn('Unable to clean up tooltip listeners.', error);
-    }
-  }
-
-  if (active.element && active.element.parentNode) {
-    active.element.parentNode.removeChild(active.element);
-  }
-
-  if (shouldResetButton && active.triggerButton && active.triggerButton.isConnected) {
-    applyLookupButtonState(active.triggerButton, 'idle');
-  }
-
-  state.activeTooltip = null;
-}
-
-async function handleAddButtonClick({ track, addButton }) {
-  if (!track || !addButton) return;
-
-  const payload = buildTrackPayload(track);
-  const label = formatTrackLabel(payload.artist, payload.title);
-  const trackId = track.id;
-
-  try {
-    addButton.disabled = true;
-    addButton.classList.add('is-busy');
-    addButton.setAttribute('aria-busy', 'true');
-    setStatus(`Adding ${label} to the radio queue...`);
-
-    await postTrackToWebhook(payload);
-
-    const changed = setTrackChecked(trackId, true);
-    setStatus(
-      `${label} sent to the radio queue ${changed ? 'and marked as checked.' : 'and was already checked.'}`
-    );
-  } catch (error) {
-    console.error(error);
-    setStatus(`Unable to add ${label}. Please try again.`);
-  } finally {
-    if (state.showChecked || !isTrackChecked(trackId)) {
-      addButton.disabled = false;
-    }
-    addButton.classList.remove('is-busy');
-    addButton.removeAttribute('aria-busy');
-  }
-}
-
-async function postTrackToWebhook(payload) {
-  const response = await fetch(WEBHOOK_URL, {
-    method: 'POST',
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Webhook responded with ${response.status}`);
-  }
-}
-
-async function postTrackCheckedStatus({ track, checked }) {
-  const payload = {
-    'spotify_id': track?.spotifyId || '',
-    artist: track?.artist || 'Unknown Artist',
-    title: track?.track || 'Untitled Track',
-    checked: Boolean(checked),
-  };
-
-  const response = await fetch(STATUS_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Status webhook responded with ${response.status}`);
-  }
-}
 
 function buildTrackPayload(track) {
   return {
@@ -1271,6 +1136,12 @@ function formatTrackLabel(artist, title) {
   const safeTitle = title || "Untitled Track";
   return `${safeArtist} - ${safeTitle}`;
 }
+function formatRemoteTrackLabel(performer, title) {
+  const safePerformer = performer || 'Unknown performer';
+  const safeTitle = title || 'Unknown title';
+  return `${safePerformer} - ${safeTitle}`;
+}
+
 
 function renderPagination(totalPages, totalItems) {
   if (!elements.pagination) return;
