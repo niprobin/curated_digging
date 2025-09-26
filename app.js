@@ -31,12 +31,20 @@ const state = {
   lookupAbortController: null,
   lookupButton: null,
   activeTooltip: null,
-  previewAudio: null,
-  previewTrackSourceId: null,
-  previewAbortController: null,
-  previewButton: null,
-  previewLabel: null,
-  isFetchingPreview: false,
+  miniPlayer: null,
+  miniPlayerControl: null,
+  miniPlayerProgress: null,
+  miniPlayerCurrentTime: null,
+  miniPlayerDuration: null,
+  miniPlayerLabel: null,
+  miniPlayerCloseButton: null,
+  miniPlayerAudio: null,
+  miniPlayerTrackSourceId: null,
+  miniPlayerTrack: null,
+  miniPlayerAbortController: null,
+  miniPlayerRequestId: null,
+  miniPlayerIsOpen: false,
+  isMiniPlayerLoading: false,
 };
 
 const elements = {
@@ -711,6 +719,7 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, remo
   tooltipPlayButton.className = 'track-action-button track-tooltip-play';
   tooltipPlayButton.dataset.remoteTrackId = remoteTrackId ? String(remoteTrackId) : '';
   tooltipPlayButton.setAttribute('aria-label', 'Play preview');
+  tooltipPlayButton.innerHTML = '<i class="fa-solid fa-play"></i>';
   tooltipPlayButton.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -722,7 +731,7 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, remo
     tooltipPlayButton.setAttribute('aria-disabled', 'true');
   }
 
-  applyTooltipPlayButtonState(tooltipPlayButton, 'idle');
+
 
   content.append(label, tooltipPlayButton);
 
@@ -771,39 +780,6 @@ function showTrackTooltip({ playButton, trackId, performerName, trackTitle, remo
 }
 
 
-function applyTooltipPlayButtonState(button, stateValue) {
-  if (!button) return;
-  const isDisabled = button.getAttribute('aria-disabled') === 'true';
-  button.classList.remove('is-loading', 'is-playing');
-
-  if (stateValue === 'loading') {
-    button.classList.add('is-loading');
-    button.disabled = true;
-    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    button.setAttribute('aria-label', 'Loading preview');
-    return;
-  }
-
-  if (stateValue === 'playing') {
-    button.classList.add('is-playing');
-    button.disabled = false;
-    button.innerHTML = '<i class="fa-solid fa-pause"></i>';
-    button.setAttribute('aria-label', 'Pause preview');
-    return;
-  }
-
-  if (isDisabled) {
-    button.disabled = true;
-    button.innerHTML = '<i class="fa-solid fa-play"></i>';
-    button.setAttribute('aria-label', 'Preview unavailable');
-    return;
-  }
-
-  button.disabled = false;
-  button.innerHTML = '<i class="fa-solid fa-play"></i>';
-  button.setAttribute('aria-label', 'Play preview');
-}
-
 function handleTooltipPlayButtonClick({ tooltipButton, remoteTrackId, track }) {
   if (!tooltipButton) {
     return;
@@ -815,53 +791,165 @@ function handleTooltipPlayButtonClick({ tooltipButton, remoteTrackId, track }) {
     return;
   }
 
-  if (state.isFetchingPreview && state.previewButton === tooltipButton) {
-    return;
-  }
-
-  const isCurrentlyPlaying =
-    state.previewAudio &&
-    state.previewButton === tooltipButton &&
-    !state.previewAudio.paused;
-
-  if (isCurrentlyPlaying) {
-    const label = formatTrackLabel(track?.artist, track?.track);
-    setStatus(`Preview paused for ${label}.`);
-    stopTooltipPlayback({ silent: true });
-    return;
-  }
-
-  startTooltipPreview({ button: tooltipButton, remoteTrackId, track });
+  openMiniPlayer({ remoteTrackId, track });
 }
 
-async function startTooltipPreview({ button, remoteTrackId, track }) {
-  if (!button || !remoteTrackId) {
+function ensureMiniPlayer() {
+  if (state.miniPlayer) {
     return;
   }
 
-  const label = formatTrackLabel(track?.artist, track?.track);
-  stopTooltipPlayback({ silent: true });
+  const container = document.createElement('section');
+  container.className = 'mini-player';
+  container.setAttribute('aria-live', 'polite');
 
-  state.previewButton = button;
-  state.previewTrackSourceId = remoteTrackId;
-  state.previewLabel = label;
+  container.innerHTML = `
+    <div class="mini-player__content">
+      <button type="button" class="track-action-button mini-player__control" aria-label="Play preview">
+        <i class="fa-solid fa-play"></i>
+      </button>
+      <div class="mini-player__info">
+        <span class="mini-player__label">Preview</span>
+        <div class="mini-player__timeline">
+          <span class="mini-player__time mini-player__time--current">0:00</span>
+          <input type="range" min="0" value="0" class="mini-player__progress" />
+          <span class="mini-player__time mini-player__time--duration">--:--</span>
+        </div>
+      </div>
+      <button type="button" class="track-action-button mini-player__close" aria-label="Close preview">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  state.miniPlayer = container;
+  state.miniPlayerControl = container.querySelector('.mini-player__control');
+  state.miniPlayerProgress = container.querySelector('.mini-player__progress');
+  state.miniPlayerCurrentTime = container.querySelector('.mini-player__time--current');
+  state.miniPlayerDuration = container.querySelector('.mini-player__time--duration');
+  state.miniPlayerLabel = container.querySelector('.mini-player__label');
+  state.miniPlayerCloseButton = container.querySelector('.mini-player__close');
+
+  if (state.miniPlayerControl) {
+    state.miniPlayerControl.addEventListener('click', handleMiniPlayerControlClick);
+  }
+  if (state.miniPlayerProgress) {
+    state.miniPlayerProgress.addEventListener('input', handleMiniPlayerSeek);
+    state.miniPlayerProgress.disabled = true;
+    state.miniPlayerProgress.value = '0';
+    state.miniPlayerProgress.max = '0';
+  }
+  if (state.miniPlayerCloseButton) {
+    state.miniPlayerCloseButton.addEventListener('click', closeMiniPlayer);
+  }
+
+  if (state.miniPlayerCurrentTime) {
+    state.miniPlayerCurrentTime.textContent = '0:00';
+  }
+  if (state.miniPlayerDuration) {
+    state.miniPlayerDuration.textContent = '--:--';
+  }
+}
+
+function openMiniPlayer({ remoteTrackId, track }) {
+  if (!remoteTrackId) {
+    setStatus('Preview unavailable for this track.');
+    return;
+  }
+
+  ensureMiniPlayer();
+
+  const labelText = formatTrackLabel(track?.artist, track?.track);
+  if (state.miniPlayerLabel) {
+    state.miniPlayerLabel.textContent = labelText;
+  }
+
+  state.miniPlayerTrackSourceId = String(remoteTrackId);
+  state.miniPlayerTrack = track || null;
+  state.miniPlayerIsOpen = true;
+
+  if (state.miniPlayer) {
+    state.miniPlayer.classList.add('is-visible');
+  }
+
+  stopMiniPlayerAudio({ silent: true });
+  resetMiniPlayerProgress();
+  setMiniPlayerControlState('loading');
+
+  beginMiniPlayerPlayback();
+}
+
+function setMiniPlayerControlState(mode) {
+  const button = state.miniPlayerControl;
+  if (!button) return;
+
+  button.classList.remove('is-loading', 'is-playing');
+  button.disabled = false;
+
+  if (mode === 'loading') {
+    button.classList.add('is-loading');
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    button.setAttribute('aria-label', 'Loading preview');
+    return;
+  }
+
+  if (mode === 'playing') {
+    button.classList.add('is-playing');
+    button.innerHTML = '<i class="fa-solid fa-pause"></i>';
+    button.setAttribute('aria-label', 'Pause preview');
+    return;
+  }
+
+  button.innerHTML = '<i class="fa-solid fa-play"></i>';
+  button.setAttribute('aria-label', 'Play preview');
+}
+
+function handleMiniPlayerControlClick() {
+  if (state.isMiniPlayerLoading) {
+    return;
+  }
+
+  if (state.miniPlayerAudio && !state.miniPlayerAudio.paused) {
+    stopMiniPlayerAudio({ silent: false });
+    return;
+  }
+
+  if (!state.miniPlayerTrackSourceId) {
+    setStatus('Preview unavailable for this track.');
+    return;
+  }
+
+  setMiniPlayerControlState('loading');
+  beginMiniPlayerPlayback();
+}
+
+async function beginMiniPlayerPlayback() {
+  const remoteTrackId = state.miniPlayerTrackSourceId;
+  if (!remoteTrackId) {
+    setMiniPlayerControlState('idle');
+    return;
+  }
+
+  stopMiniPlayerAudio({ silent: true });
+
+  const requestId = Symbol('mini-player');
+  state.miniPlayerRequestId = requestId;
 
   const controller = new AbortController();
-  state.previewAbortController = controller;
-  state.isFetchingPreview = true;
-  state.previewAudio = null;
+  state.miniPlayerAbortController = controller;
+  state.isMiniPlayerLoading = true;
 
-  applyTooltipPlayButtonState(button, 'loading');
+  const label = state.miniPlayerLabel?.textContent || 'track';
   setStatus(`Fetching preview for ${label}...`);
 
-  const requestUrl = new URL('https://eu.qqdl.site/api/download-music');
-  requestUrl.searchParams.set('track_id', remoteTrackId);
-  requestUrl.searchParams.set('quality', '27');
-
-  let audio = null;
-  let succeeded = false;
-
   try {
+    const requestUrl = new URL('https://eu.qqdl.site/api/download-music');
+    requestUrl.searchParams.set('track_id', remoteTrackId);
+    requestUrl.searchParams.set('quality', '27');
+
     const response = await fetch(requestUrl.toString(), { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}`);
@@ -873,100 +961,193 @@ async function startTooltipPreview({ button, remoteTrackId, track }) {
       throw new Error('Playable URL missing.');
     }
 
-    if (controller.signal.aborted) {
+    if (state.miniPlayerRequestId !== requestId || controller.signal.aborted) {
       return;
     }
 
-    audio = new Audio(streamUrl);
+    const audio = new Audio(streamUrl);
     audio.crossOrigin = 'anonymous';
+    audio.addEventListener('timeupdate', updateMiniPlayerProgress);
+    audio.addEventListener('loadedmetadata', updateMiniPlayerMetadata);
+    audio.addEventListener('ended', handleMiniPlayerEnded);
+    audio.addEventListener('pause', handleMiniPlayerPaused);
 
-    audio.addEventListener('ended', () => {
-      if (state.previewAudio === audio) {
-        setStatus(`Preview finished for ${label}.`);
-        stopTooltipPlayback({ silent: true });
-      }
-    });
+    state.miniPlayerAudio = audio;
+    state.miniPlayerAbortController = null;
 
-    audio.addEventListener('error', (event) => {
-      if (state.previewAudio === audio) {
-        console.error('Tooltip audio error', event);
-        setStatus(`Playback error for ${label}.`);
-        stopTooltipPlayback({ silent: true });
-      }
-    });
+    try {
+      await audio.play();
+    } catch (error) {
+      audio.removeEventListener('timeupdate', updateMiniPlayerProgress);
+      audio.removeEventListener('loadedmetadata', updateMiniPlayerMetadata);
+      audio.removeEventListener('ended', handleMiniPlayerEnded);
+      audio.removeEventListener('pause', handleMiniPlayerPaused);
+      state.miniPlayerAudio = null;
+      throw error;
+    }
 
-    state.previewAudio = audio;
-    state.previewAbortController = null;
-    state.isFetchingPreview = false;
-
-    await audio.play();
-    applyTooltipPlayButtonState(button, 'playing');
-    setStatus(`Playing preview for ${label}.`);
-    succeeded = true;
-  } catch (error) {
-    if (error.name === 'AbortError' || controller.signal.aborted) {
+    if (state.miniPlayerRequestId !== requestId) {
       return;
     }
-    console.error('Unable to start tooltip preview', error);
-    setStatus(`Unable to play preview for ${label}.`);
-  } finally {
-    if (state.previewAbortController === controller) {
-      state.previewAbortController = null;
+
+    state.isMiniPlayerLoading = false;
+    state.miniPlayerRequestId = null;
+
+    if (state.miniPlayerProgress) {
+      state.miniPlayerProgress.disabled = false;
+      if (!Number.isNaN(audio.duration) && audio.duration > 0) {
+        state.miniPlayerProgress.max = String(audio.duration);
+      }
     }
-    if (!succeeded) {
-      state.previewAudio = null;
-      state.previewTrackSourceId = null;
-      state.previewLabel = null;
-      if (state.previewButton === button) {
-        state.previewButton = null;
-      }
-      state.isFetchingPreview = false;
-      if (button.isConnected) {
-        applyTooltipPlayButtonState(button, 'idle');
-      }
+    if (state.miniPlayerDuration && !Number.isNaN(audio.duration) && audio.duration > 0) {
+      state.miniPlayerDuration.textContent = formatTime(audio.duration);
+    }
+
+    setMiniPlayerControlState('playing');
+    setStatus(`Playing preview for ${label}.`);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+    console.error('Unable to start mini player preview', error);
+    state.isMiniPlayerLoading = false;
+    setMiniPlayerControlState('idle');
+    const currentLabel = state.miniPlayerLabel?.textContent || 'track';
+    setStatus(`Unable to play preview for ${currentLabel}.`);
+  } finally {
+    if (state.miniPlayerAbortController === controller) {
+      state.miniPlayerAbortController = null;
+    }
+    if (state.miniPlayerRequestId === requestId) {
+      state.miniPlayerRequestId = null;
+      state.isMiniPlayerLoading = false;
     }
   }
 }
 
-function stopTooltipPlayback({ silent = false } = {}) {
-  const controller = state.previewAbortController;
-  if (controller) {
-    try {
-      controller.abort();
-    } catch (error) {
-      console.warn('Unable to abort preview request.', error);
+function updateMiniPlayerMetadata() {
+  const audio = state.miniPlayerAudio;
+  if (!audio || Number.isNaN(audio.duration)) {
+    return;
+  }
+  if (state.miniPlayerProgress) {
+    state.miniPlayerProgress.max = String(audio.duration);
+    state.miniPlayerProgress.disabled = false;
+  }
+  if (state.miniPlayerDuration) {
+    state.miniPlayerDuration.textContent = formatTime(audio.duration);
+  }
+}
+
+function updateMiniPlayerProgress() {
+  const audio = state.miniPlayerAudio;
+  if (!audio) {
+    return;
+  }
+
+  const current = audio.currentTime || 0;
+  if (!Number.isNaN(current)) {
+    if (state.miniPlayerProgress) {
+      state.miniPlayerProgress.value = String(current);
+    }
+    if (state.miniPlayerCurrentTime) {
+      state.miniPlayerCurrentTime.textContent = formatTime(current);
     }
   }
-  state.previewAbortController = null;
+}
 
-  const audio = state.previewAudio;
-  const button = state.previewButton;
-  const label = state.previewLabel;
+function handleMiniPlayerSeek(event) {
+  const audio = state.miniPlayerAudio;
+  if (!audio || Number.isNaN(audio.duration) || audio.duration <= 0) {
+    event.target.value = '0';
+    return;
+  }
+  const nextTime = Number(event.target.value);
+  if (!Number.isNaN(nextTime)) {
+    audio.currentTime = nextTime;
+    if (state.miniPlayerCurrentTime) {
+      state.miniPlayerCurrentTime.textContent = formatTime(nextTime);
+    }
+  }
+}
 
-  state.previewAudio = null;
-  state.previewTrackSourceId = null;
-  state.previewButton = null;
-  state.previewLabel = null;
-  state.isFetchingPreview = false;
+function handleMiniPlayerEnded() {
+  const label = state.miniPlayerLabel?.textContent || 'track';
+  stopMiniPlayerAudio({ silent: true });
+  setMiniPlayerControlState('idle');
+  setStatus(`Preview finished for ${label}.`);
+}
 
+function handleMiniPlayerPaused() {
+  // No-op: playback lifecycle is managed by the control button.
+}
+
+function stopMiniPlayerAudio({ silent = false } = {}) {
+  if (state.miniPlayerAbortController) {
+    try {
+      state.miniPlayerAbortController.abort();
+    } catch (error) {
+      console.warn('Unable to abort mini player request.', error);
+    }
+  }
+  state.miniPlayerAbortController = null;
+  state.miniPlayerRequestId = null;
+  state.isMiniPlayerLoading = false;
+
+  const audio = state.miniPlayerAudio;
   if (audio) {
+    audio.removeEventListener('timeupdate', updateMiniPlayerProgress);
+    audio.removeEventListener('loadedmetadata', updateMiniPlayerMetadata);
+    audio.removeEventListener('ended', handleMiniPlayerEnded);
+    audio.removeEventListener('pause', handleMiniPlayerPaused);
     try {
       audio.pause();
     } catch (error) {
-      console.warn('Unable to pause preview audio.', error);
+      console.warn('Unable to pause mini player audio.', error);
     }
     audio.src = '';
   }
+  state.miniPlayerAudio = null;
 
-  if (button && button.isConnected) {
-    applyTooltipPlayButtonState(button, 'idle');
-  }
+  resetMiniPlayerProgress();
+  setMiniPlayerControlState('idle');
 
-  if (!silent && label) {
+  if (!silent) {
+    const label = state.miniPlayerLabel?.textContent || 'track';
     setStatus(`Preview paused for ${label}.`);
   }
 }
 
+function resetMiniPlayerProgress() {
+  if (state.miniPlayerProgress) {
+    state.miniPlayerProgress.value = '0';
+    state.miniPlayerProgress.max = '0';
+    state.miniPlayerProgress.disabled = true;
+  }
+  if (state.miniPlayerCurrentTime) {
+    state.miniPlayerCurrentTime.textContent = '0:00';
+  }
+  if (state.miniPlayerDuration) {
+    state.miniPlayerDuration.textContent = '--:--';
+  }
+}
+
+function closeMiniPlayer() {
+  stopMiniPlayerAudio({ silent: true });
+  state.miniPlayerIsOpen = false;
+  if (state.miniPlayer) {
+    state.miniPlayer.classList.remove('is-visible');
+  }
+}
+
+function formatTime(totalSeconds) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return '--:--';
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
 function positionTooltip(tooltip, playButton) {
   if (!tooltip || !playButton) {
     return;
@@ -996,9 +1177,6 @@ function closeActiveTooltip({ shouldResetButton = true } = {}) {
   if (!active) {
     return;
   }
-
-  stopTooltipPlayback({ silent: true });
-
   if (typeof active.cleanup === 'function') {
     try {
       active.cleanup();
@@ -1371,4 +1549,15 @@ function slugify(value) {
 function formatNumber(value) {
   return new Intl.NumberFormat().format(value);
 }
+
+
+
+
+
+
+
+
+
+
+
 
