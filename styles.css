@@ -428,8 +428,8 @@ body {
 
 .playlist-drawer__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  grid-auto-rows: minmax(clamp(34px, 4vh, 44px), auto);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-auto-rows: clamp(34px, 4vh, 44px);
   gap: 8px;
   align-content: start;
   overflow: hidden;
@@ -698,6 +698,29 @@ body {
 }
 
 .mini-player__control,
+.mini-player__autoplay {
+  color: var(--color-muted);
+}
+
+.mini-player__autoplay:hover,
+.mini-player__autoplay:focus {
+  color: var(--color-text);
+  background: rgba(59, 130, 246, 0.35);
+  border-color: rgba(125, 195, 255, 0.75);
+}
+
+.mini-player__autoplay.is-active {
+  background: rgba(59, 130, 246, 0.45);
+  border-color: rgba(125, 195, 255, 0.95);
+  color: var(--color-text);
+}
+
+.mini-player__autoplay.is-active:hover,
+.mini-player__autoplay.is-active:focus {
+  background: rgba(59, 130, 246, 0.6);
+  border-color: rgba(191, 219, 254, 0.95);
+}
+
 .mini-player__close {
   width: 34px;
   height: 34px;
@@ -737,3 +760,5 @@ body {
     min-width: 34px;
   }
 }
+
+

@@ -6,6 +6,7 @@ const STATUS_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/track-checked';
 const STORAGE_KEYS = {
   checked: 'curatedDigging:checkedTracks',
   showChecked: 'curatedDigging:showChecked',
+  autoPlay: 'curatedDigging:autoPlayEnabled',
 };
 
 const FILTERS = [
@@ -78,6 +79,10 @@ const state = {
   miniPlayerIsOpen: false,
   isMiniPlayerLoading: false,
   activeTrackId: null,
+  miniPlayerAutoPlayToggle: null,
+  autoPlayEnabled: false,
+  autoPlayCurrentTrackId: null,
+  autoPlayIsAdvancing: false,
 };
 
 const elements = {
@@ -492,6 +497,9 @@ function createTrackCard(track) {
   const article = document.createElement('article');
   article.className = 'track-card';
   article.setAttribute('role', 'group');
+  if (track.id != null) {
+    article.dataset.trackId = String(track.id);
+  }
   article.setAttribute(
     'aria-label',
     `${track.track || 'Untitled track'} by ${track.artist || 'Unknown artist'}`
@@ -650,7 +658,7 @@ async function handlePlayButtonClick({ track, playButton }) {
   state.lookupButton = playButton;
   const rawQuery = `${track.artist || ''} ${track.track || ''}`;
   const searchQuery = rawQuery.trim();
-  const requestUrl = new URL('https://eu.qqdl.site/api/get-music');
+  const requestUrl = new URL('https://qqdl.site/api/get-music');
   requestUrl.searchParams.set('q', searchQuery || rawQuery);
   requestUrl.searchParams.set('offset', '0');
   const controller = new AbortController();
@@ -739,6 +747,114 @@ function clearActiveTrackButton() {
     setPlayButtonState(button, 'idle');
   }
   state.activeTrackId = null;
+}
+
+function getAutoPlayTrackList() {
+  if (!state.activeCurator) {
+    return [];
+  }
+
+  const curatorTracks = state.tracks
+    .filter((track) => track.curator === state.activeCurator)
+    .filter(matchesActiveFilter);
+
+  if (state.showChecked) {
+    return curatorTracks;
+  }
+
+  return curatorTracks.filter((track) => !isTrackChecked(track.id));
+}
+
+function scrollTrackIntoView(trackId) {
+  if (trackId == null || !elements.cardsContainer) {
+    return;
+  }
+
+  const value = String(trackId);
+  const selector = `.track-card[data-track-id="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : value}"]`;
+  const card = elements.cardsContainer.querySelector(selector);
+  if (card) {
+    try {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (error) {
+      console.warn('Unable to scroll track into view.', error);
+    }
+  }
+}
+
+function autoPlayNextTrack() {
+  if (!state.autoPlayEnabled || state.autoPlayIsAdvancing) {
+    return;
+  }
+
+  const sequence = getAutoPlayTrackList();
+  if (!sequence.length) {
+    setStatus('Auto play unavailable for the current view.');
+    return;
+  }
+
+  const currentId = state.autoPlayCurrentTrackId != null ? String(state.autoPlayCurrentTrackId) : null;
+  let nextIndex = 0;
+
+  if (currentId) {
+    const currentIndex = sequence.findIndex((track) => track && track.id != null && String(track.id) === currentId);
+    nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+  }
+
+  if (nextIndex >= sequence.length) {
+    setStatus('Reached the end of the track list.');
+    state.autoPlayCurrentTrackId = null;
+    return;
+  }
+
+  const nextTrack = sequence[nextIndex];
+  if (!nextTrack || nextTrack.id == null) {
+    setStatus('Unable to determine the next track to auto play.');
+    return;
+  }
+
+  const targetPage = Math.floor(nextIndex / state.pageSize) + 1;
+  const trackLabel = formatTrackLabel(nextTrack.artist, nextTrack.track);
+  state.autoPlayCurrentTrackId = String(nextTrack.id);
+  setStatus(`Auto playing ${trackLabel}...`);
+  state.autoPlayIsAdvancing = true;
+
+  const playNext = () => {
+    if (!state.autoPlayEnabled) {
+      state.autoPlayIsAdvancing = false;
+      return;
+    }
+
+    const button = getPlayButtonElement(nextTrack.id);
+    if (!button) {
+      setStatus('Unable to locate the next track to auto play.');
+      state.autoPlayIsAdvancing = false;
+      return;
+    }
+
+    const maybePromise = handlePlayButtonClick({ track: nextTrack, playButton: button });
+    const finalize = () => {
+      scrollTrackIntoView(nextTrack.id);
+      state.autoPlayIsAdvancing = false;
+    };
+
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      maybePromise.then(finalize).catch((error) => {
+        console.warn('Auto play failed to start the next track.', error);
+        state.autoPlayIsAdvancing = false;
+      });
+    } else {
+      finalize();
+    }
+  };
+
+  if (state.currentPage !== targetPage) {
+    state.currentPage = targetPage;
+    renderCards();
+    requestAnimationFrame(playNext);
+  } else {
+    playNext();
+  }
 }
 
 function ensurePlaylistDrawer() {
@@ -1002,6 +1118,9 @@ function ensureMiniPlayer() {
           <span class="mini-player__time mini-player__time--duration">--:--</span>
         </div>
       </div>
+      <button type="button" class="track-action-button mini-player__autoplay" aria-pressed="false" aria-label="Enable auto play">
+        <i class="fa-solid fa-forward-step"></i>
+      </button>
       <button type="button" class="track-action-button mini-player__close" aria-label="Close preview">
         <i class="fa-solid fa-xmark"></i>
       </button>
@@ -1016,6 +1135,7 @@ function ensureMiniPlayer() {
   state.miniPlayerCurrentTime = container.querySelector('.mini-player__time--current');
   state.miniPlayerDuration = container.querySelector('.mini-player__time--duration');
   state.miniPlayerLabel = container.querySelector('.mini-player__label');
+  state.miniPlayerAutoPlayToggle = container.querySelector('.mini-player__autoplay');
   state.miniPlayerCloseButton = container.querySelector('.mini-player__close');
 
   if (state.miniPlayerControl) {
@@ -1031,12 +1151,49 @@ function ensureMiniPlayer() {
     state.miniPlayerCloseButton.addEventListener('click', closeMiniPlayer);
   }
 
+  if (state.miniPlayerAutoPlayToggle) {
+    state.miniPlayerAutoPlayToggle.addEventListener('click', handleMiniPlayerAutoPlayToggle);
+    updateMiniPlayerAutoPlayToggle();
+  }
   if (state.miniPlayerCurrentTime) {
     state.miniPlayerCurrentTime.textContent = '0:00';
   }
   if (state.miniPlayerDuration) {
     state.miniPlayerDuration.textContent = '--:--';
   }
+}
+
+function handleMiniPlayerAutoPlayToggle() {
+  setAutoPlayEnabled(!state.autoPlayEnabled);
+}
+
+function setAutoPlayEnabled(enabled) {
+  const value = Boolean(enabled);
+  if (state.autoPlayEnabled === value) {
+    updateMiniPlayerAutoPlayToggle();
+    return;
+  }
+
+  state.autoPlayEnabled = value;
+  state.autoPlayIsAdvancing = false;
+  if (value) {
+    state.autoPlayCurrentTrackId = state.activeTrackId != null ? String(state.activeTrackId) : null;
+  }
+  persistAutoPlayPreference(value);
+  updateMiniPlayerAutoPlayToggle();
+}
+
+function updateMiniPlayerAutoPlayToggle() {
+  const button = state.miniPlayerAutoPlayToggle;
+  if (!button) {
+    return;
+  }
+  button.classList.toggle('is-active', state.autoPlayEnabled);
+  button.setAttribute('aria-pressed', state.autoPlayEnabled ? 'true' : 'false');
+  button.setAttribute(
+    'aria-label',
+    state.autoPlayEnabled ? 'Disable auto play' : 'Enable auto play'
+  );
 }
 
 function openMiniPlayer({ remoteTrackId, track, performerName, trackTitle }) {
@@ -1060,6 +1217,8 @@ function openMiniPlayer({ remoteTrackId, track, performerName, trackTitle }) {
   };
   state.miniPlayerIsOpen = true;
   state.activeTrackId = track?.id != null ? String(track.id) : null;
+  state.autoPlayCurrentTrackId = track?.id != null ? String(track.id) : null;
+  state.autoPlayIsAdvancing = false;
 
   if (state.miniPlayer) {
     state.miniPlayer.classList.add('is-visible');
@@ -1137,7 +1296,7 @@ async function beginMiniPlayerPlayback() {
   setStatus(`Fetching preview for ${label}...`);
 
   try {
-    const requestUrl = new URL('https://eu.qqdl.site/api/download-music');
+    const requestUrl = new URL('https://qqdl.site/api/download-music');
     requestUrl.searchParams.set('track_id', remoteTrackId);
     requestUrl.searchParams.set('quality', '27');
 
@@ -1266,7 +1425,13 @@ function handleMiniPlayerEnded() {
   const label = state.miniPlayerLabel?.textContent || 'track';
   stopMiniPlayerAudio({ silent: true });
   setMiniPlayerControlState('idle');
-  setStatus(`Preview finished for ${label}.`);
+
+  if (state.autoPlayEnabled) {
+    setStatus(`Preview finished for ${label}. Advancing...`);
+    autoPlayNextTrack();
+  } else {
+    setStatus(`Preview finished for ${label}.`);
+  }
 }
 
 function handleMiniPlayerPaused() {
@@ -1299,6 +1464,7 @@ function stopMiniPlayerAudio({ silent = false } = {}) {
     audio.src = '';
   }
   state.miniPlayerAudio = null;
+  state.autoPlayIsAdvancing = false;
 
   resetMiniPlayerProgress();
   setMiniPlayerControlState('idle');
@@ -1330,6 +1496,8 @@ function closeMiniPlayer() {
   state.miniPlayerTrackSourceId = null;
   state.miniPlayerTrack = null;
   state.miniPlayerRemoteTrack = null;
+  state.autoPlayCurrentTrackId = null;
+  state.autoPlayIsAdvancing = false;
   if (state.miniPlayer) {
     state.miniPlayer.classList.remove('is-visible');
   }
@@ -1452,6 +1620,7 @@ async function requestTracks({ force = false } = {}) {
 function initializeCheckedState() {
   state.checkedTracks = loadCheckedTracksFromStorage();
   state.showChecked = loadShowCheckedPreference();
+  state.autoPlayEnabled = loadAutoPlayPreference();
 }
 
 function loadCheckedTracksFromStorage() {
@@ -1487,6 +1656,36 @@ function persistCheckedTracks() {
     window.localStorage.setItem(STORAGE_KEYS.checked, serialised);
   } catch (error) {
     console.warn('Unable to persist checked tracks.', error);
+  }
+}
+
+function loadAutoPlayPreference() {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return false;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.autoPlay);
+    if (raw == null) {
+      return false;
+    }
+    const normalised = raw.toLowerCase();
+    return normalised === 'true' || normalised === '1' || normalised === 'yes';
+  } catch (error) {
+    console.warn('Unable to read auto-play preference from storage.', error);
+    return false;
+  }
+}
+
+function persistAutoPlayPreference(value) {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.autoPlay, value ? 'true' : 'false');
+  } catch (error) {
+    console.warn('Unable to persist auto-play preference.', error);
   }
 }
 
@@ -1643,15 +1842,3 @@ function slugify(value) {
 function formatNumber(value) {
   return new Intl.NumberFormat().format(value);
 }
-
-
-
-
-
-
-
-
-
-
-
-
