@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Latest Albums | Curated Digging</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://kit.fontawesome.com/cd85a69654.js" crossorigin="anonymous"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="page-header container" aria-label="Albums overview">
+        <div class="page-header__content">
+          <a class="back-link" href="index.html">&#8592; Back to tracks</a>
+          <h1>Latest Albums</h1>
+          <p class="page-header__lead">A quick overview of the newest releases from artists you follow.</p>
+        </div>
+      </header>
+      <main class="container">
+        <p id="albumsStatus" class="status-message" role="status"></p>
+        <section id="albumGrid" class="album-grid" aria-live="polite" aria-label="Album results"></section>
+      </main>
+    </div>
+
+    <script src="albums.js" type="module"></script>
+  </body>
+</html>
