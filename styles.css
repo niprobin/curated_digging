@@ -872,7 +872,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .album-card__play-button,
@@ -880,16 +880,20 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 18px;
-  border-radius: var(--radius-sm);
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
   border: 1px solid rgba(59, 130, 246, 0.45);
   background: rgba(6, 10, 18, 0.65);
   color: var(--color-primary-strong);
-  font-family: 'Inter', sans-serif;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 1rem;
   cursor: pointer;
   transition: transform 160ms ease, border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
+}
+
+.album-card__play-button i,
+.album-card__hide-button i {
+  pointer-events: none;
 }
 
 .album-card__play-button:hover,
@@ -900,7 +904,7 @@ body {
   background: rgba(59, 130, 246, 0.4);
   border-color: rgba(125, 195, 255, 0.8);
   color: var(--color-text);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .album-card__play-button[aria-busy='true'],
@@ -932,11 +936,6 @@ body {
 
   .album-card__actions {
     justify-content: center;
-  }
-
-  .album-card__play-button,
-  .album-card__hide-button {
-    width: 100%;
   }
 }
 

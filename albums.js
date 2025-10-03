@@ -301,7 +301,7 @@ async function handleAlbumPlay(button) {
       throw new Error('Album ID missing in YAMS response');
     }
 
-    const albumUrl = `https://www.yams.tf/#/album/2/${albumId}`;
+    const albumUrl = `https://yams.tf/#/album/2/${albumId}`;
     window.open(albumUrl, '_blank', 'noopener');
     setAlbumsStatus(`Opening ${releaseName} on YAMS...`);
   } catch (error) {
