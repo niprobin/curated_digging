@@ -44,7 +44,7 @@ body {
 }
 
 .app-shell {
-  padding-bottom: 80px;
+  padding: 40px;
   width: 100%;
   max-width: 100%;
 }
@@ -784,24 +784,35 @@ body {
 }
 
 .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(6, 10, 18, 0.65);
   font-size: 0.85rem;
+  font-weight: 500;
   color: var(--color-primary-strong);
   text-decoration: none;
   width: fit-content;
-  transition: color var(--transition-base);
+  transition: border-color var(--transition-base), background var(--transition-base), color var(--transition-base), transform var(--transition-base);
 }
 
 .back-link:hover,
 .back-link:focus {
   color: var(--color-text);
-  text-decoration: underline;
+  background: rgba(59, 130, 246, 0.35);
+  border-color: rgba(125, 195, 255, 0.65);
+  transform: translateY(-1px);
+  text-decoration: none;
 }
 
 .album-grid {
   display: grid;
   gap: 20px;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  padding: 60px;
+  padding: 20px 0px;
 }
 
 .album-card {
