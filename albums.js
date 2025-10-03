@@ -1,4 +1,5 @@
 ﻿const ALBUM_DATA_URL = 'https://opensheet.elk.sh/1LOx-C1USXeC92Mtv0u6NizEvcTMWkKJNGiNTwAtSj3E/2';
+const ALBUM_HIDE_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/album-done';
 
 const albumState = {
   albums: [],
@@ -24,8 +25,30 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
+  bindAlbumGridEvents();
   hydrateAlbumsPage();
 });
+
+function bindAlbumGridEvents() {
+  albumElements.grid.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('.album-card__hide-button') : null;
+    if (!button || button.hasAttribute('aria-busy')) {
+      return;
+    }
+
+    const card = button.closest('.album-card');
+    if (!card) {
+      return;
+    }
+
+    const albumId = card.getAttribute('data-album-id');
+    if (!albumId) {
+      return;
+    }
+
+    toggleAlbumHidden(albumId, button);
+  });
+}
 
 async function hydrateAlbumsPage() {
   setAlbumsStatus('Loading albums...');
@@ -91,6 +114,7 @@ function buildAlbumRecord(record, index) {
     addedDateRaw,
     releaseDateValue: releaseDate ? releaseDate.getTime() : Number.NEGATIVE_INFINITY,
     releaseDateFormatted: releaseDate ? releaseDateFormatter.format(releaseDate) : 'Date TBC',
+    isHidden: false,
   };
 }
 
@@ -191,13 +215,70 @@ function createAlbumCard(album) {
   const hideButton = document.createElement('button');
   hideButton.type = 'button';
   hideButton.className = 'album-card__hide-button';
-  hideButton.innerHTML = '<i class=\"fa-solid fa-check\"></i>';
-  hideButton.setAttribute('aria-label', `Mark ${album.releaseName} as hidden`);
+  hideButton.innerHTML = '<i class="fa-solid fa-check"></i>';
+  hideButton.dataset.releaseName = album.releaseName;
+  applyHideButtonState(hideButton, Boolean(album.isHidden));
 
   actions.appendChild(hideButton);
 
   card.append(cover, body, actions);
   return card;
+}
+
+async function toggleAlbumHidden(albumId, button) {
+  const album = albumState.albums.find((item) => item.id === albumId);
+  if (!album) {
+    return;
+  }
+
+  const currentState = Boolean(album.isHidden);
+  const nextState = !currentState;
+
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  applyHideButtonState(button, nextState);
+  setAlbumsStatus(nextState ? `Marking ${album.releaseName} as hidden...` : `Making ${album.releaseName} visible...`);
+
+  try {
+    await postAlbumHideState({
+      releaseName: album.releaseName,
+      hidden: nextState,
+    });
+
+    album.isHidden = nextState;
+    setAlbumsStatus(nextState ? `${album.releaseName} is now hidden.` : `${album.releaseName} is visible again.`);
+  } catch (error) {
+    console.error(error);
+    applyHideButtonState(button, currentState);
+    setAlbumsStatus('We could not update the album. Please try again.');
+  } finally {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+  }
+}
+
+async function postAlbumHideState({ releaseName, hidden }) {
+  const payload = {
+    release_name: releaseName,
+    hide: Boolean(hidden),
+  };
+
+  const response = await fetch(ALBUM_HIDE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Album webhook responded with ${response.status}`);
+  }
+}
+
+function applyHideButtonState(button, hidden) {
+  button.classList.toggle('is-hidden', hidden);
+  button.setAttribute('aria-pressed', String(hidden));
+  const releaseName = button.dataset.releaseName || 'this release';
+  button.setAttribute('aria-label', hidden ? `Unhide ${releaseName}` : `Mark ${releaseName} as hidden`);
 }
 
 function setAlbumsStatus(message) {
