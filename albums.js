@@ -31,22 +31,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function bindAlbumGridEvents() {
   albumElements.grid.addEventListener('click', (event) => {
-    const button = event.target instanceof Element ? event.target.closest('.album-card__hide-button') : null;
-    if (!button || button.hasAttribute('aria-busy')) {
+    const button = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!button) {
       return;
     }
 
-    const card = button.closest('.album-card');
-    if (!card) {
+    if (button.classList.contains('album-card__hide-button')) {
+      if (button.hasAttribute('aria-busy')) {
+        return;
+      }
+
+      const card = button.closest('.album-card');
+      if (!card) {
+        return;
+      }
+
+      const albumId = card.getAttribute('data-album-id');
+      if (!albumId) {
+        return;
+      }
+
+      toggleAlbumHidden(albumId, button);
       return;
     }
 
-    const albumId = card.getAttribute('data-album-id');
-    if (!albumId) {
-      return;
-    }
+    if (button.classList.contains('album-card__play-button')) {
+      if (button.hasAttribute('aria-busy')) {
+        return;
+      }
 
-    toggleAlbumHidden(albumId, button);
+      handleAlbumPlay(button);
+    }
   });
 }
 
@@ -160,6 +175,7 @@ function createAlbumCard(album) {
   const card = document.createElement('article');
   card.className = 'album-card';
   card.setAttribute('data-album-id', album.id);
+  card.setAttribute('data-hidden', String(Boolean(album.isHidden)));
 
   const cover = document.createElement('div');
   cover.className = 'album-card__cover';
@@ -202,15 +218,13 @@ function createAlbumCard(album) {
   const actions = document.createElement('div');
   actions.className = 'album-card__actions';
 
-  if (album.spotifyUrl) {
-    const spotifyLink = document.createElement('a');
-    spotifyLink.href = album.spotifyUrl;
-    spotifyLink.target = '_blank';
-    spotifyLink.rel = 'noopener noreferrer';
-    spotifyLink.className = 'album-card__spotify-link';
-    spotifyLink.innerHTML = '<i class="fa-solid fa-play"></i>';
-    actions.appendChild(spotifyLink);
-  }
+  const playButton = document.createElement('button');
+  playButton.type = 'button';
+  playButton.className = 'album-card__play-button';
+  playButton.innerHTML = '<i class="fa-solid fa-play"></i>';
+  playButton.dataset.releaseName = album.releaseName;
+  playButton.setAttribute('aria-label', `Open ${album.releaseName} on YAMS`);
+  actions.appendChild(playButton);
 
   const hideButton = document.createElement('button');
   hideButton.type = 'button';
@@ -246,11 +260,53 @@ async function toggleAlbumHidden(albumId, button) {
     });
 
     album.isHidden = nextState;
+    const card = button.closest('.album-card');
+    if (card) {
+      card.setAttribute('data-hidden', String(nextState));
+    }
     setAlbumsStatus(nextState ? `${album.releaseName} is now hidden.` : `${album.releaseName} is visible again.`);
   } catch (error) {
     console.error(error);
     applyHideButtonState(button, currentState);
     setAlbumsStatus('We could not update the album. Please try again.');
+  } finally {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+  }
+}
+
+async function handleAlbumPlay(button) {
+  const releaseName = (button.dataset.releaseName || '').trim();
+  if (!releaseName) {
+    console.warn('Missing release name for play lookup.');
+    return;
+  }
+
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  setAlbumsStatus(`Looking up ${releaseName}...`);
+
+  try {
+    const url = new URL('https://api.yams.tf/search');
+    url.searchParams.set('query', releaseName);
+
+    const response = await fetch(url.toString(), { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`YAMS lookup failed with ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const albumId = Array.isArray(payload?.albums) && payload.albums.length ? payload.albums[0]?.id : null;
+    if (!albumId) {
+      throw new Error('Album ID missing in YAMS response');
+    }
+
+    const albumUrl = `https://www.yams.tf/#/album/2/${albumId}`;
+    window.open(albumUrl, '_blank', 'noopener');
+    setAlbumsStatus(`Opening ${releaseName} on YAMS...`);
+  } catch (error) {
+    console.error(error);
+    setAlbumsStatus(`We couldn't locate a YAMS album for ${releaseName}.`);
   } finally {
     button.disabled = false;
     button.removeAttribute('aria-busy');

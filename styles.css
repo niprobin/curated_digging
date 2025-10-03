@@ -875,6 +875,7 @@ body {
   gap: 10px;
 }
 
+.album-card__play-button,
 .album-card__hide-button {
   display: inline-flex;
   align-items: center;
@@ -891,23 +892,8 @@ body {
   transition: transform 160ms ease, border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
 }
 
-.album-card__spotify-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 18px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(59, 130, 246, 0.45);
-  background: rgba(6, 10, 18, 0.65);
-  color: var(--color-primary-strong);
-  font-family: 'Inter', sans-serif;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 160ms ease, border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
-  text-decoration:none;
-}
-
+.album-card__play-button:hover,
+.album-card__play-button:focus,
 .album-card__hide-button:hover,
 .album-card__hide-button:focus {
   outline: none;
@@ -917,6 +903,7 @@ body {
   transform: translateY(-1px);
 }
 
+.album-card__play-button[aria-busy='true'],
 .album-card__hide-button[aria-busy='true'] {
   cursor: wait;
   opacity: 0.6;
@@ -947,6 +934,7 @@ body {
     justify-content: center;
   }
 
+  .album-card__play-button,
   .album-card__hide-button {
     width: 100%;
   }
