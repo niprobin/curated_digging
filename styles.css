@@ -886,6 +886,7 @@ body {
   gap: 12px;
 }
 
+.album-card__add-button,
 .album-card__play-button,
 .album-card__hide-button {
   display: inline-flex;
@@ -902,11 +903,14 @@ body {
   transition: transform 160ms ease, border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
 }
 
+.album-card__add-button i,
 .album-card__play-button i,
 .album-card__hide-button i {
   pointer-events: none;
 }
 
+.album-card__add-button:hover,
+.album-card__add-button:focus,
 .album-card__play-button:hover,
 .album-card__play-button:focus,
 .album-card__hide-button:hover,
@@ -918,6 +922,7 @@ body {
   transform: translateY(-2px);
 }
 
+.album-card__add-button[aria-busy='true'],
 .album-card__play-button[aria-busy='true'],
 .album-card__hide-button[aria-busy='true'] {
   cursor: wait;
@@ -929,6 +934,59 @@ body {
   border-color: rgba(45, 212, 191, 0.65);
   color: var(--color-success-strong);
   box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.25);
+}
+
+.album-card__add {
+  position: relative;
+}
+
+.album-card__rating-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(6, 10, 18, 0.95);
+  box-shadow: var(--shadow-elevated);
+  z-index: 12;
+}
+
+.album-card__rating-menu[hidden] {
+  display: none;
+}
+
+.album-card__rating-option {
+  min-width: 44px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(8, 10, 16, 0.85);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base), color var(--transition-base), transform var(--transition-base);
+}
+
+.album-card__rating-option i {
+  color: var(--color-primary-strong);
+  margin-left: 4px;
+  pointer-events: none;
+}
+
+.album-card__rating-option:hover,
+.album-card__rating-option:focus {
+  outline: none;
+  background: rgba(59, 130, 246, 0.35);
+  border-color: rgba(125, 195, 255, 0.8);
+  color: var(--color-text);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 960px) {
