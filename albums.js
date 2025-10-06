@@ -32,20 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
   albumElements.grid = document.querySelector('#albumGrid');
 
   if (!albumElements.grid) {
-    let main = document.querySelector('main');
-
-    if (!main) {
-      main = document.createElement('main');
-      main.classList.add('container');
-      const appShell = document.querySelector('.app-shell');
-      if (appShell) {
-        appShell.appendChild(main);
-      } else {
-        document.body.appendChild(main);
-      }
-    }
-
-    if (main && !main.querySelector('#albumGrid')) {
+    const main = document.querySelector('main');
+    if (main) {
       const fallbackGrid = document.createElement('section');
       fallbackGrid.id = 'albumGrid';
       fallbackGrid.className = 'album-grid';
@@ -53,9 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
       fallbackGrid.setAttribute('aria-label', 'Album results');
       main.appendChild(fallbackGrid);
     }
-
     albumElements.grid = document.querySelector('#albumGrid');
   }
+
 
   albumElements.listenForm = document.querySelector('#albumListenForm');
   albumElements.listenInput = document.querySelector('#albumListenInput');
