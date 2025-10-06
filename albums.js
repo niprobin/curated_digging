@@ -1,6 +1,13 @@
-﻿const ALBUM_DATA_URL = 'https://opensheet.elk.sh/1LOx-C1USXeC92Mtv0u6NizEvcTMWkKJNGiNTwAtSj3E/2';
+const ALBUM_DATA_URL = 'https://opensheet.elk.sh/1LOx-C1USXeC92Mtv0u6NizEvcTMWkKJNGiNTwAtSj3E/2';
 const ALBUM_HIDE_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/album-done';
 const ALBUM_ADD_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/add-album';
+const ALBUM_LISTEN_WEBHOOK_URL = 'https://n8n.niprobin.com/webhook/listen-to-album';
+const YAMS_SEARCH_URL = 'https://api.yams.tf/search';
+const TIDAL_SEARCH_URL = 'https://tidal-api-2.binimum.org/search/';
+const TIDAL_SEARCH_TOKEN = '1759763452~YWE4MWM4OGU1MmI3YzI5MmFkODFlN2JiZmNhZGI4ZDExODBhNTI4MA==';
+const TIDAL_ALBUM_URL_BASE = 'https://music.binimum.org/album/';
+const YAMS_ALBUM_URL_BASE = 'https://yams.tf/#/album/2/';
+
 
 const albumState = {
   albums: [],
@@ -10,7 +17,9 @@ const albumState = {
 
 const albumElements = {
   grid: null,
-  status: null,
+  listenForm: null,
+  listenInput: null,
+  listenButton: null,
 };
 
 const releaseDateFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -21,14 +30,17 @@ const releaseDateFormatter = new Intl.DateTimeFormat('en-GB', {
 
 document.addEventListener('DOMContentLoaded', () => {
   albumElements.grid = document.querySelector('#albumGrid');
-  albumElements.status = document.querySelector('#albumsStatus');
+  albumElements.listenForm = document.querySelector('#albumListenForm');
+  albumElements.listenInput = document.querySelector('#albumListenInput');
+  albumElements.listenButton = document.querySelector('#albumListenSubmit');
 
-  if (!albumElements.grid || !albumElements.status) {
+  if (!albumElements.grid) {
     console.error('Albums page is missing required containers.');
     return;
   }
 
   bindAlbumGridEvents();
+  bindAlbumListenForm();
   document.addEventListener('mousedown', handleGlobalPointerDown);
   document.addEventListener('keydown', handleGlobalKeydown);
   hydrateAlbumsPage();
@@ -85,8 +97,75 @@ function bindAlbumGridEvents() {
   });
 }
 
+function bindAlbumListenForm() {
+  const { listenForm, listenInput } = albumElements;
+  if (!listenForm || !listenInput) {
+    return;
+  }
+
+  listenForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    if (listenForm.dataset.submitting === 'true') {
+      return;
+    }
+
+    const albumName = listenInput.value.trim();
+    if (!albumName) {
+      listenInput.focus();
+      return;
+    }
+
+    listenForm.dataset.submitting = 'true';
+    const submitButton = albumElements.listenButton || listenForm.querySelector("button[type='submit']");
+    if (submitButton && !submitButton.dataset.defaultLabel) {
+      submitButton.dataset.defaultLabel = submitButton.textContent ? submitButton.textContent.trim() : 'Send';
+    }
+    if (submitButton) {
+      albumElements.listenButton = submitButton;
+    }
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.setAttribute('aria-busy', 'true');
+      submitButton.textContent = 'Sending...';
+    }
+
+    try {
+      const response = await fetch(ALBUM_LISTEN_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ album_name: albumName }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Album listen webhook responded with ${response.status}`);
+      }
+
+      listenInput.value = '';
+      if (submitButton) {
+        submitButton.textContent = 'Sent!';
+      }
+    } catch (error) {
+      console.error(error);
+      if (submitButton) {
+        submitButton.textContent = 'Try again';
+      }
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.removeAttribute('aria-busy');
+        const defaultLabel = submitButton.dataset.defaultLabel || 'Send';
+        window.setTimeout(() => {
+          submitButton.textContent = defaultLabel;
+        }, 1600);
+      }
+      listenForm.removeAttribute('data-submitting');
+    }
+  });
+}
+
 async function hydrateAlbumsPage() {
-  setAlbumsStatus('Loading albums...');
 
   try {
     const response = await fetch(ALBUM_DATA_URL, { cache: 'no-cache' });
@@ -101,14 +180,8 @@ async function hydrateAlbumsPage() {
 
     albumState.albums = normalizeAlbums(payload);
     renderAlbumGrid(albumState.albums);
-    if (albumState.albums.length === 0) {
-      setAlbumsStatus('No recent releases to display.');
-    } else {
-      setAlbumsStatus('');
-    }
   } catch (error) {
     console.error(error);
-    setAlbumsStatus('We could not load albums. Please try again later.');
   }
 }
 
@@ -279,7 +352,7 @@ function createAlbumCard(album) {
   playButton.className = 'album-card__play-button';
   playButton.innerHTML = '<i class="fa-solid fa-play"></i>';
   playButton.dataset.releaseName = album.releaseName;
-  playButton.setAttribute('aria-label', `Open ${album.releaseName} on YAMS`);
+  playButton.setAttribute('aria-label', `Find streaming links for ${album.releaseName}`);
   actions.appendChild(playButton);
 
   const hideButton = document.createElement('button');
@@ -291,7 +364,13 @@ function createAlbumCard(album) {
 
   actions.appendChild(hideButton);
 
-  card.append(cover, body, actions);
+  const playLinks = document.createElement('div');
+  playLinks.className = 'album-card__play-links';
+  playLinks.hidden = true;
+  playLinks.setAttribute('aria-live', 'polite');
+  playLinks.setAttribute('role', 'status');
+
+  card.append(cover, body, actions, playLinks);
   return card;
 }
 
@@ -347,7 +426,6 @@ async function handleAlbumRatingSelection(button) {
 
   addButton.disabled = true;
   addButton.setAttribute('aria-busy', 'true');
-  setAlbumsStatus(`Adding ${releaseName} with rating ${ratingValue}...`);
 
   try {
     await postAlbumAdd({ releaseName, rating: ratingValue });
@@ -356,10 +434,8 @@ async function handleAlbumRatingSelection(button) {
       await setAlbumHiddenState(albumId, hideButton, true);
     }
 
-    setAlbumsStatus(`${releaseName} added with rating ${ratingValue}.`);
   } catch (error) {
     console.error(error);
-    setAlbumsStatus(`We couldn't add ${releaseName}. Please try again.`);
   } finally {
     addButton.disabled = false;
     addButton.removeAttribute('aria-busy');
@@ -440,7 +516,6 @@ async function setAlbumHiddenState(albumId, button, desiredState = null) {
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
   applyHideButtonState(button, nextState);
-  setAlbumsStatus(nextState ? `Marking ${album.releaseName} as hidden...` : `Making ${album.releaseName} visible...`);
 
   try {
     await postAlbumHideState({
@@ -453,12 +528,10 @@ async function setAlbumHiddenState(albumId, button, desiredState = null) {
     if (card) {
       card.setAttribute('data-hidden', String(nextState));
     }
-    setAlbumsStatus(nextState ? `${album.releaseName} is now hidden.` : `${album.releaseName} is visible again.`);
     return nextState;
   } catch (error) {
     console.error(error);
     applyHideButtonState(button, currentState);
-    setAlbumsStatus('We could not update the album. Please try again.');
     throw error;
   } finally {
     button.disabled = false;
@@ -473,35 +546,142 @@ async function handleAlbumPlay(button) {
     return;
   }
 
+  const card = button.closest('.album-card');
+  const linksContainer = card ? card.querySelector('.album-card__play-links') : null;
+  if (linksContainer) {
+    linksContainer.hidden = true;
+    linksContainer.innerHTML = '';
+  }
+
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
-  setAlbumsStatus(`Looking up ${releaseName}...`);
 
   try {
-    const url = new URL('https://api.yams.tf/search');
-    url.searchParams.set('query', releaseName);
+    const results = await Promise.allSettled([
+      lookupYamsAlbum(releaseName),
+      lookupTidalAlbum(releaseName),
+    ]);
 
-    const response = await fetch(url.toString(), { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`YAMS lookup failed with ${response.status}`);
+    const links = [];
+    const failedProviders = [];
+
+    results.forEach((result, index) => {
+      const provider = index === 0 ? 'yams' : 'tidal';
+      if (result.status === 'fulfilled') {
+        links.push(result.value);
+      } else {
+        const reason = result.status === 'rejected' ? result.reason : new Error(`Unknown ${provider} error`);
+        console.error(reason);
+        failedProviders.push(provider);
+      }
+    });
+
+    if (linksContainer) {
+      const fragment = document.createDocumentFragment();
+
+      if (links.length) {
+        const heading = document.createElement('p');
+        heading.className = 'album-card__play-links-heading';
+        heading.textContent = 'Available links';
+        fragment.appendChild(heading);
+
+        const list = document.createElement('ul');
+        list.className = 'album-card__play-links-list';
+
+        links.forEach((link) => {
+          const item = document.createElement('li');
+          item.className = 'album-card__play-links-item';
+
+          const anchor = document.createElement('a');
+          anchor.className = 'album-card__play-link';
+          anchor.href = link.url;
+          anchor.target = '_blank';
+          anchor.rel = 'noopener';
+          anchor.textContent = link.label;
+
+          item.appendChild(anchor);
+          list.appendChild(item);
+        });
+
+        fragment.appendChild(list);
+      }
+
+      if (failedProviders.length) {
+        const providerLabels = failedProviders.map((provider) => (provider === 'yams' ? 'YAMS' : 'Binimum Music'));
+        const note = document.createElement('p');
+        note.className = 'album-card__play-links-note';
+        note.textContent = providerLabels.length === 1
+          ? `Could not find a link on ${providerLabels[0]}.`
+          : `Could not find links on ${providerLabels.join(' and ')}.`;
+        fragment.appendChild(note);
+      }
+
+      if (!links.length && !failedProviders.length) {
+        const note = document.createElement('p');
+        note.className = 'album-card__play-links-note';
+        note.textContent = 'No streaming links available right now.';
+        fragment.appendChild(note);
+      }
+
+      if (fragment.childNodes.length) {
+        linksContainer.appendChild(fragment);
+        linksContainer.hidden = false;
+      } else {
+        linksContainer.hidden = true;
+      }
     }
 
-    const payload = await response.json();
-    const albumId = Array.isArray(payload?.albums) && payload.albums.length ? payload.albums[0]?.id : null;
-    if (!albumId) {
-      throw new Error('Album ID missing in YAMS response');
-    }
-
-    const albumUrl = `https://yams.tf/#/album/2/${albumId}`;
-    window.open(albumUrl, '_blank', 'noopener');
-    setAlbumsStatus(`Opening ${releaseName} on YAMS...`);
   } catch (error) {
     console.error(error);
-    setAlbumsStatus(`We couldn't locate a YAMS album for ${releaseName}.`);
   } finally {
     button.disabled = false;
     button.removeAttribute('aria-busy');
   }
+}
+
+async function lookupYamsAlbum(releaseName) {
+  const url = new URL(YAMS_SEARCH_URL);
+  url.searchParams.set('query', releaseName);
+
+  const response = await fetch(url.toString(), { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`YAMS lookup failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const albumId = Array.isArray(payload?.albums) && payload.albums.length ? payload.albums[0]?.id : null;
+  if (!albumId) {
+    throw new Error('Album ID missing in YAMS response');
+  }
+
+  return {
+    provider: 'yams',
+    url: `${YAMS_ALBUM_URL_BASE}${albumId}`,
+    label: 'Open on YAMS',
+  };
+}
+
+async function lookupTidalAlbum(releaseName) {
+  const url = new URL(TIDAL_SEARCH_URL);
+  url.searchParams.set('al', releaseName);
+  url.searchParams.set('token', TIDAL_SEARCH_TOKEN);
+
+  const response = await fetch(url.toString(), { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Binimum lookup failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const albumId = payload?.albums?.items?.[0]?.id || null;
+  if (!albumId) {
+    throw new Error('Album ID missing in Binimum response');
+  }
+
+  return {
+    provider: 'tidal',
+    url: `${TIDAL_ALBUM_URL_BASE}${albumId}`,
+    label: 'Open on Binimum Music',
+  };
 }
 
 async function postAlbumAdd({ releaseName, rating }) {
@@ -545,8 +725,4 @@ function applyHideButtonState(button, hidden) {
   button.setAttribute('aria-label', hidden ? `Unhide ${releaseName}` : `Mark ${releaseName} as hidden`);
 }
 
-function setAlbumsStatus(message) {
-  if (!albumElements.status) return;
-  albumElements.status.textContent = message;
-  albumElements.status.style.display = message ? 'block' : 'none';
-}
+
