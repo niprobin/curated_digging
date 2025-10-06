@@ -13,22 +13,14 @@
   <body>
     <div class="app-shell">
       <header class="page-header container" aria-label="Albums overview">
-        <div class="page-header__bar">
-          <div class="page-header__content">
-            <a class="back-link" href="index.html"><i class="fa-solid fa-arrow-left"></i> Back to tracks</a>
-            <h1>Latest Albums</h1>
-            <p class="page-header__lead">A quick overview of the newest releases from artists you follow.</p>
-          </div>
-          <form id="albumListenForm" class="album-listen-form" autocomplete="off">
-            <label class="sr-only" for="albumListenInput">Album name to open</label>
-            <div class="album-listen-form__controls">
-              <input type="text" id="albumListenInput" name="album_name" class="album-listen-form__input" placeholder="Album name..." required />
-              <button type="submit" id="albumListenSubmit" class="album-listen-form__button">Send</button>
-            </div>
-          </form>
+        <div class="page-header__content">
+          <a class="back-link" href="index.html"><i class="fa-solid fa-arrow-left"></i> Back to tracks</a>
+          <h1>Latest Albums</h1>
+          <p class="page-header__lead">A quick overview of the newest releases from artists you follow.</p>
         </div>
       </header>
       <main class="container">
+        <p id="albumsStatus" class="status-message" role="status"></p>
         <section id="albumGrid" class="album-grid" aria-live="polite" aria-label="Album results"></section>
       </main>
     </div>
