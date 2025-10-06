@@ -30,6 +30,20 @@ const releaseDateFormatter = new Intl.DateTimeFormat('en-GB', {
 
 document.addEventListener('DOMContentLoaded', () => {
   albumElements.grid = document.querySelector('#albumGrid');
+
+  if (!albumElements.grid) {
+    const main = document.querySelector('main');
+    if (main) {
+      const fallbackGrid = document.createElement('section');
+      fallbackGrid.id = 'albumGrid';
+      fallbackGrid.className = 'album-grid';
+      fallbackGrid.setAttribute('aria-live', 'polite');
+      fallbackGrid.setAttribute('aria-label', 'Album results');
+      main.appendChild(fallbackGrid);
+      albumElements.grid = fallbackGrid;
+    }
+  }
+
   albumElements.listenForm = document.querySelector('#albumListenForm');
   albumElements.listenInput = document.querySelector('#albumListenInput');
   albumElements.listenButton = document.querySelector('#albumListenSubmit');
@@ -45,6 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', handleGlobalKeydown);
   hydrateAlbumsPage();
 });
+
+
 
 function bindAlbumGridEvents() {
   albumElements.grid.addEventListener('click', (event) => {
