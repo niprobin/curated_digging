@@ -40,10 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
       fallbackGrid.setAttribute('aria-live', 'polite');
       fallbackGrid.setAttribute('aria-label', 'Album results');
       main.appendChild(fallbackGrid);
+      albumElements.grid = fallbackGrid;
     }
-    albumElements.grid = document.querySelector('#albumGrid');
   }
-
 
   albumElements.listenForm = document.querySelector('#albumListenForm');
   albumElements.listenInput = document.querySelector('#albumListenInput');
@@ -53,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error('Albums page is missing required containers.');
     return;
   }
+
   bindAlbumGridEvents();
   bindAlbumListenForm();
   document.addEventListener('mousedown', handleGlobalPointerDown);
